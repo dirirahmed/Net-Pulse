@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -23,7 +24,7 @@ var serviceMap = map[int]string{
 
 func scanPort(ip string, port int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	address := fmt.Sprintf("%s:%d", ip, port)
+	address := net.JoinHostPort(ip, strconv.Itoa(port))
 
 	// Fast timeout so we don't wait forever on closed doors
 	conn, err := net.DialTimeout("tcp", address, 1*time.Second)
