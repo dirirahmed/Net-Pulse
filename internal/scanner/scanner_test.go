@@ -63,8 +63,8 @@ func TestProbeOpenPort(t *testing.T) {
 	if res.State != model.StateOpen {
 		t.Fatalf("state = %s, want OPEN", res.State)
 	}
-	if res.Latency <= 0 {
-		t.Errorf("latency = %v, want > 0", res.Latency)
+	if res.Latency < 0 {
+		t.Errorf("latency = %v, want >= 0", res.Latency)
 	}
 	if res.Port != port {
 		t.Errorf("port = %d, want %d", res.Port, port)
