@@ -1,0 +1,16 @@
+# build output
+/netpulse
+/netpulse.exe
+/bin/
+
+# go test stuff
+*.test
+*.out
+
+# editor junk
+.vscode/
+.idea/
+
+# os junk
+.DS_Store
+Thumbs.db
