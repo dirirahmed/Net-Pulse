@@ -1,17 +1,89 @@
-Net-Pulse: Concurrent Service Auditor
-🚀 The "Point" of this Project
-Net-Pulse is a high-performance network diagnostic tool built in Go. While a standard "ping" only tells you if a computer is on, Net-Pulse tells you if the services on that computer (like Web Servers or Databases) are actually functioning and ready to talk.
+# Net-Pulse v2: Network Diagnostics Engine
 
-This project demonstrates a deep understanding of the TCP/IP stack and concurrency patterns.
+## The point of this project
 
-🛠️ What it actually does
-Service Discovery: It maps common port numbers (443, 53, 3306) to their real-world functions (HTTPS, DNS, MySQL) so you can see what a server is "selling".
+Net-Pulse is a network diagnostic tool built in Go. A standard `ping` only tells
+you whether a machine is on. Net-Pulse tells you whether the *services* on that
+machine are actually functioning: whether the name resolves, whether the port
+accepts a connection, whether the TLS certificate is valid, and whether the web
+server answers.
 
-TCP Handshake Validation: Instead of guessing, it completes a full SYN/ACK handshake with the target to ensure the connection is stable.
+V1 was a concurrent port scanner. V2 is a reusable diagnostics engine with a CLI
+on top of it. The networking code produces structured results and never prints
+anything, so the same engine can back an API and a results database later
+without being rewritten.
 
-Parallel Probing: Using Goroutines, it knocks on every "door" (port) at the exact same time, making it significantly faster than sequential scanners.
+## What it does
 
-💻 Usage
-    Bash
-    go run main.go <target-ip-or-domain>
-    Example: go run main.go 8.8.8.8 This will identify if Google's Public DNS and Web services are active.
+**DNS diagnostics** - resolved addresses, CNAME, lookup duration, and a
+classified error when resolution fails or times out.
+
+**Port scanning** - configurable port lists and ranges, scanned by a fixed
+worker pool. Each port reports open / closed / timeout / error plus how long the
+connection took. Known ports are mapped to the service they usually carry.
+
+**TCP diagnostics** - a real connection to the target port, with duration,
+local/remote addresses and a classified failure reason.
+
+**TLS diagnostics** - a real, *verifying* handshake. Records the negotiated
+version and cipher, ALPN, the certificate chain, expiry, and whether validation
+succeeded. Verification is never disabled to make a probe look successful: when
+a chain fails to validate, the result stays a failure and the certificate is
+re-read separately only so you can see what was wrong with it.
+
+**HTTP/HTTPS diagnostics** - status code, total duration, time to first byte,
+the redirect chain, interesting response headers, and classified transport
+errors.
+
+## Usage
+
+```bash
+go run . example.com
+go run . https://example.com/health
+go run . -checks dns,tls -ports 443,8443 example.com
+go run . -json 1.1.1.1 > scan.json
+```
+
+Flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-ports` | `default` | `default`, `all`, or a list like `22,80,443,8000-8010` |
+| `-checks` | `all` | any of `dns,ports,tcp,tls,http` |
+| `-concurrency` | `100` | maximum simultaneous port connections |
+| `-timeout` | `2s` | TCP connect timeout per port |
+| `-dns-timeout` | `3s` | DNS lookup timeout |
+| `-tls-timeout` | `5s` | TLS handshake timeout |
+| `-http-timeout` | `10s` | HTTP request timeout |
+| `-total-timeout` | `60s` | budget for the whole scan |
+| `-method` | `GET` | HTTP method |
+| `-follow` | `true` | follow redirects |
+| `-max-redirects` | `10` | redirect limit |
+| `-json` | `false` | emit the structured report instead of text |
+| `-show-closed` | `false` | list closed and filtered ports too |
+
+Running with no target keeps the V1 behaviour and scans `8.8.8.8`.
+
+## Layout
+
+```
+main.go                     entry point only
+internal/result/            structured result types (pure data, JSON ready)
+internal/probe/             dns, tcp, scan, tls, http probes + error classification
+internal/engine/            target parsing and orchestration into one Report
+internal/cli/               flags and text rendering
+```
+
+The dependency direction is one-way: `cli -> engine -> probe -> result`. Nothing
+below `cli` knows how results are displayed.
+
+## Tests
+
+```bash
+go test ./...
+go test -race ./...
+go test -bench=. ./internal/probe
+```
+
+Tests use loopback listeners, `httptest` servers and a fake DNS resolver, so
+they do not need internet access.
