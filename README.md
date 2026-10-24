@@ -72,10 +72,38 @@ internal/result/            structured result types (pure data, JSON ready)
 internal/probe/             dns, tcp, scan, tls, http probes + error classification
 internal/engine/            target parsing and orchestration into one Report
 internal/cli/               flags and text rendering
+internal/safety/            target checks for callers that don't own the target
 ```
 
 The dependency direction is one-way: `cli -> engine -> probe -> result`. Nothing
 below `cli` knows how results are displayed.
+
+## Scanning untrusted targets
+
+The CLI assumes you own what you point it at, so it does no checking. Anything
+that takes a target from someone else cannot assume that, and `internal/safety`
+exists for those callers:
+
+```go
+guard := &safety.Guard{}
+if err := guard.CheckTarget(ctx, target.Host); err != nil {
+    return err // loopback, private, link-local, reserved, or a local hostname
+}
+
+opts := engine.DefaultOptions()
+opts.Dialer = guard.Dialer()   // enforced again at connect time
+report := engine.Run(ctx, target, opts)
+```
+
+Two checks, because neither is enough alone. `CheckTarget` resolves the name
+and refuses it if *any* answer is reserved. `Dialer` re-checks inside
+`net.Dialer.Control`, which runs after resolution with the address the kernel
+is about to connect to — that is what catches a name resolving differently the
+second time, and redirects pointing at internal hosts.
+
+Every probe dials through whatever dialer it is handed, so setting
+`Options.Dialer` once covers ports, TCP, TLS and HTTP together. Setting
+`AllowPrivate` turns both checks off for local development.
 
 ## Tests
 

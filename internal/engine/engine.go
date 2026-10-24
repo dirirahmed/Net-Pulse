@@ -53,6 +53,12 @@ type Options struct {
 	// RootCAs overrides the system trust store. Tests use it; production runs
 	// leave it nil so real verification applies.
 	RootCAs *x509.CertPool
+
+	// Dialer, when set, is used for every outbound connection this scan makes.
+	// A caller that does not control the target supplies one whose Control
+	// hook refuses private addresses, which is what covers DNS rebinding and
+	// redirects to internal hosts. The engine attaches no policy of its own.
+	Dialer *net.Dialer
 }
 
 // DefaultOptions returns sensible defaults for interactive use.
@@ -158,6 +164,7 @@ func Run(ctx context.Context, target result.Target, opts Options) result.Report 
 		scan := probe.ScanPorts(ctx, dialHost, opts.Ports, probe.ScanOptions{
 			Concurrency: opts.Concurrency,
 			Timeout:     opts.DialTimeout,
+			Dialer:      opts.Dialer,
 		})
 		scan.Host = target.Host
 		scan.Address = dialHost
@@ -167,6 +174,7 @@ func Run(ctx context.Context, target result.Target, opts Options) result.Report 
 	if opts.Checks.TCP {
 		tcp := probe.TCP(ctx, net.JoinHostPort(dialHost, strconv.Itoa(port)), probe.TCPOptions{
 			Timeout: opts.DialTimeout,
+			Dialer:  opts.Dialer,
 		})
 		rep.TCP = &tcp
 	}
@@ -180,6 +188,7 @@ func Run(ctx context.Context, target result.Target, opts Options) result.Report 
 				Timeout:                opts.TLSTimeout,
 				ServerName:             target.Host,
 				RootCAs:                opts.RootCAs,
+				Dialer:                 opts.Dialer,
 				NextProtos:             []string{"h2", "http/1.1"},
 				CollectOnVerifyFailure: true,
 			})
@@ -198,6 +207,7 @@ func Run(ctx context.Context, target result.Target, opts Options) result.Report 
 				MaxRedirects:    opts.MaxRedirects,
 				UserAgent:       opts.UserAgent,
 				RootCAs:         opts.RootCAs,
+				Dialer:          opts.Dialer,
 			})
 			rep.HTTP = &httpRes
 		}
