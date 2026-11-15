@@ -158,3 +158,16 @@ func TestDiskSpaceStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribeOverridesGenericReason(t *testing.T) {
+	e := NewAlertEngine()
+	o := Observation{
+		Key: "net_down:site", Rule: "net_down", Component: "network", Title: "Site unreachable", Value: 3,
+		Levels:   []Level{{models.SeverityCritical, 3}},
+		Describe: func(Level) string { return "Site failed 3 checks in a row" },
+	}
+	evs := e.Evaluate(t0, []Observation{o}, 0)
+	if len(evs) != 1 || evs[0].Alert.Reason != "Site failed 3 checks in a row" {
+		t.Fatalf("events = %+v", evs)
+	}
+}

@@ -32,6 +32,11 @@ type HTTPOptions struct {
 	RootCAs         *x509.CertPool
 	Dialer          *net.Dialer
 	MaxBodyBytes    int64
+
+	// DisableProxy ignores HTTP(S)_PROXY. A caller enforcing a target policy
+	// through Dialer needs this: through a proxy the dialer only ever sees
+	// the proxy's address, never the target's.
+	DisableProxy bool
 }
 
 // HTTP issues one request and records status, timing and redirect information.
@@ -90,8 +95,12 @@ func HTTP(ctx context.Context, rawURL string, opts HTTPOptions) result.HTTPResul
 		req.Header.Set(k, v)
 	}
 
+	proxy := http.ProxyFromEnvironment
+	if opts.DisableProxy {
+		proxy = nil
+	}
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		Proxy:                 proxy,
 		DialContext:           dialContextFunc(opts.Dialer, opts.Timeout),
 		TLSClientConfig:       &tls.Config{RootCAs: opts.RootCAs},
 		TLSHandshakeTimeout:   opts.Timeout,

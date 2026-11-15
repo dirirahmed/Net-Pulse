@@ -24,6 +24,7 @@ import (
 	"github.com/dirirahmed/Net-Pulse/internal/collector"
 	"github.com/dirirahmed/Net-Pulse/internal/config"
 	"github.com/dirirahmed/Net-Pulse/internal/monitor"
+	"github.com/dirirahmed/Net-Pulse/internal/netwatch"
 	"github.com/dirirahmed/Net-Pulse/internal/storage"
 	"github.com/dirirahmed/Net-Pulse/web"
 )
@@ -79,13 +80,14 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	defer stop()
 
 	var store monitor.Store
+	var netStore netwatch.Store // stays a nil interface when the database is unavailable
 	dbPath := filepath.Join(*dataDir, "history.db")
 	db, dbErr := storage.Open(dbPath)
 	if dbErr != nil {
 		log.Error("history database unavailable; continuing with live data only", "path", dbPath, "err", dbErr)
 	} else {
 		defer db.Close()
-		store = db
+		store, netStore = db, db
 		if n, err := db.CloseDanglingAlerts(ctx, time.Now()); err == nil && n > 0 {
 			log.Info("closed alerts left open by previous run", "count", n)
 		}
@@ -97,6 +99,11 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 		Config: cfgStore, Collector: col, Processes: collector.NewProcessSampler(),
 		Store: store, StoreErr: dbErr, Host: collector.HostInfo(ctx), Logger: log,
 	})
+
+	// Scheduled checks of the configured network targets run beside the
+	// system monitor and share its database and alert history.
+	nw := netwatch.New(netwatch.Options{Config: cfgStore, Store: netStore, Logger: log})
+	log.Info("network monitoring", "targets", len(cfg.Network.Targets), "allowPrivateTargets", cfg.Network.AllowPrivateTargets)
 
 	static, bundled := web.Dist()
 	if !bundled {
@@ -120,6 +127,11 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 		mon.Run(ctx)
 		close(done)
 	}()
+	netDone := make(chan struct{})
+	go func() {
+		nw.Run(ctx)
+		close(netDone)
+	}()
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http server stopped", "err", err)
@@ -139,6 +151,7 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
 	<-done
+	<-netDone
 	return nil
 }
 

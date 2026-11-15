@@ -31,6 +31,10 @@ type Observation struct {
 	// Hysteresis is how far past the lowest threshold the value must recover
 	// before the alert resolves, which prevents flapping around the line.
 	Hysteresis float64
+	// Describe, when set, writes the alert reason instead of the generic
+	// "<title> is <value> (threshold ...)" text. Rules whose value is a
+	// count or a day number read better in their own words.
+	Describe func(Level) string
 }
 
 func (o Observation) breaches(threshold float64) bool {
@@ -175,6 +179,9 @@ func resolve(st *ruleState, now time.Time, note string) Event {
 }
 
 func reason(o Observation, lvl Level) string {
+	if o.Describe != nil {
+		return o.Describe(lvl)
+	}
 	cmp := "≥"
 	if o.Below {
 		cmp = "≤"

@@ -153,3 +153,87 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 		t.Fatal("expected schema version error")
 	}
 }
+
+func ip(v int) *int { return &v }
+
+func TestNetChecksBucketingAndUptime(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	checks := []models.NetCheck{
+		{TargetID: "site", Timestamp: base, Status: models.NetUp, ResponseMs: fp(100), HTTPStatus: ip(200), CertDaysLeft: ip(40)},
+		{TargetID: "site", Timestamp: base.Add(30 * time.Second), Status: models.NetDegraded, ResponseMs: fp(300)},
+		{TargetID: "site", Timestamp: base.Add(60 * time.Second), Status: models.NetDown, Problem: "tcp: refused"},
+		// Blocked checks say nothing about the target and are not counted.
+		{TargetID: "site", Timestamp: base.Add(90 * time.Second), Status: models.NetBlocked, Problem: "private"},
+		{TargetID: "other", Timestamp: base, Status: models.NetDown},
+	}
+	for _, c := range checks {
+		if err := s.SaveNetCheck(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pts, err := s.QueryNetChecks(ctx, "site", base.Add(-time.Minute), base.Add(time.Hour), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pts) != 2 {
+		t.Fatalf("want 2 one-minute buckets, got %+v", pts)
+	}
+	first := pts[0]
+	if first.Checks != 2 || first.Up != 1 || first.Degraded != 1 || first.Down != 0 {
+		t.Errorf("first bucket counts = %+v", first)
+	}
+	if first.AvgResponseMs == nil || *first.AvgResponseMs != 200 || *first.MaxResponseMs != 300 {
+		t.Errorf("first bucket response = %v / %v", first.AvgResponseMs, first.MaxResponseMs)
+	}
+	if pts[1].Checks != 1 || pts[1].Down != 1 || pts[1].AvgResponseMs != nil {
+		t.Errorf("second bucket = %+v (blocked check must be excluded, missing timing stays nil)", pts[1])
+	}
+
+	u, err := s.NetUptime(ctx, "site", base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Checks != 3 || u.Up != 1 || u.Degraded != 1 || u.Down != 1 {
+		t.Errorf("uptime = %+v", u)
+	}
+	if p := u.Percent(); p == nil || int(*p+0.5) != 67 {
+		t.Errorf("uptime percent = %v, want ~66.7", p)
+	}
+	if none, err := s.NetUptime(ctx, "missing", base); err != nil || none.Checks != 0 || none.Percent() != nil {
+		t.Errorf("unknown target: %+v %v", none, err)
+	}
+
+	if _, err := s.Prune(ctx, base.Add(45*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := s.NetUptime(ctx, "site", base.Add(-time.Hour)); u.Checks != 1 {
+		t.Errorf("after prune, checks = %d, want 1", u.Checks)
+	}
+}
+
+func TestOpenUpgradesVersion1Database(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a database written by a build that predates net_checks.
+	s.db.Exec("DROP TABLE net_checks")
+	s.db.Exec("PRAGMA user_version = 1")
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen v1 database: %v", err)
+	}
+	defer s.Close()
+	if err := s.SaveNetCheck(context.Background(), models.NetCheck{TargetID: "x", Timestamp: base, Status: models.NetUp}); err != nil {
+		t.Fatalf("net_checks missing after upgrade: %v", err)
+	}
+	var v int
+	s.db.QueryRow("PRAGMA user_version").Scan(&v)
+	if v != schemaVersion {
+		t.Errorf("user_version = %d, want %d", v, schemaVersion)
+	}
+}

@@ -7,7 +7,7 @@ Net-Pulse is a local system-health, performance and network-diagnostics tool in 
 
 Both share one codebase: the same engine that powers the CLI is a library the agent can call, and the agent's analysis and optional AI assistant ("Ask Pulse") sit on top of everything it measures.
 
-> **Telemetry stays on your machine by default.** The agent listens only on `127.0.0.1` and, unless Ask Pulse is enabled and used, makes no outbound requests of its own. See [Privacy](#privacy).
+> **Telemetry stays on your machine by default.** The agent listens only on `127.0.0.1`. Its only outbound connections are to network targets you add yourself and, if you enable it, Ask Pulse. See [Privacy](#privacy).
 
 ![Dashboard](docs/screenshots/dashboard-dark-1440.png)
 
@@ -35,6 +35,7 @@ _The screenshots were captured before PC Sentinel merged into Net-Pulse, so they
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Network diagnostics: `netpulse scan`](#network-diagnostics-netpulse-scan)
+- [Network monitoring](#network-monitoring)
 - [Architecture](#architecture)
 - [Technology stack](#technology-stack)
 - [How telemetry is collected](#how-telemetry-is-collected)
@@ -80,6 +81,7 @@ go build -o bin\netpulse.exe .\cmd\netpulse
 - **Network throughput.** Download and upload rates, cumulative totals, and history. Only interface byte counters are read; packets are never inspected.
 - **Processes.** Name, PID, CPU %, memory, executable path (when accessible) and status, with sorting and search. Read-only: terminating processes is deliberately **not** supported.
 - **Performance page.** Historical charts for CPU, memory, GPU, temperatures, network, disk I/O and drive fill level over 5m / 15m / 30m / 1h / 6h / 24h / 7d, with average and peak for the selected range and a hover crosshair and tooltip.
+- **Network monitoring.** Hosts and URLs you configure are checked on a schedule with the diagnostics engine (DNS, TCP, TLS, HTTP), classified as up / degraded / down, stored with their timings, and alerted on when they go down, get slow, or their TLS certificate nears expiry. See [Network monitoring](#network-monitoring).
 - **Alerts.** Deterministic rules with sustain periods, hysteresis and cooldowns, shown with severity, timestamp, component and reason, plus stored alert history.
 - **Analysis.** Rule-based findings with evidence, explanations and recommendations, plus the optional Ask Pulse assistant. See [Performance analysis](#performance-analysis).
 - **Settings.** Refresh interval, history resolution and retention, alert cooldown, all thresholds, and theme (dark / light / system), editable in the UI and saved to a JSON config file.
@@ -141,6 +143,34 @@ report := engine.Run(ctx, target, opts)
 
 Two checks, because neither is enough alone. `CheckTarget` resolves the name and refuses it if *any* answer is reserved. `Dialer` re-checks inside `net.Dialer.Control`, which runs after resolution with the address the kernel is about to connect to; that is what catches a name resolving differently the second time, and redirects pointing at internal hosts. Every probe dials through whatever dialer it is handed, so setting `Options.Dialer` once covers ports, TCP, TLS and HTTP together. Setting `AllowPrivate` turns both checks off.
 
+## Network monitoring
+
+`netpulse serve` checks every target in `network.targets` every `checkIntervalSeconds` (default 60 s) using the same engine as `netpulse scan`: DNS, a TCP connection to the target's port, a verifying TLS handshake on TLS ports or `https://` URLs, and an HTTP request on HTTP ports or URLs. Port scans are not part of scheduled checks. Targets are configured in `config.json` for now:
+
+```json
+"network": {
+  "allowPrivateTargets": false,
+  "targets": [
+    { "id": "site", "name": "My site", "target": "https://example.com/health" },
+    { "id": "dns",  "name": "Cloudflare DNS", "target": "1.1.1.1:53" }
+  ]
+}
+```
+
+Each check is classified:
+
+| Status | Meaning |
+| --- | --- |
+| **up** | Everything that ran succeeded. A 4xx response still counts: the server answered. |
+| **degraded** | Reachable, but a 5xx response, a certificate that doesn't validate, or a response at or over `slowResponseMs` (default 1500 ms). Response time is the full HTTP request, or the TCP connect time when there is no HTTP check. |
+| **down** | DNS, the TCP connection, the TLS handshake or the HTTP request failed. |
+| **blocked** | The target resolves to a loopback, private (LAN), link-local or other reserved address and `allowPrivateTargets` is off. This is a setting, not an outage, so it never raises an alert. |
+
+- **The target guard runs on every check**, not only when a target is saved, because what a name resolves to can change. Connections go through `safety.Guard`'s dialer, and proxy environment variables are ignored while the guard is on, so the dialer always sees the real destination. `allowPrivateTargets` is off by default; turn it on to monitor your router, NAS or a service on `localhost`.
+- **Scheduling.** First checks after start-up are staggered 2 s apart, at most 4 checks run at once, and one check is capped at 25 s.
+- **History.** Every check is written to the `net_checks` table with its status, DNS / connect / TLS / time-to-first-byte / response times, HTTP status and certificate days left. The last 60 checks per target are also kept in memory.
+- Changing a target's address starts its history view over; renaming it keeps it.
+
 ## Architecture
 
 ```
@@ -183,6 +213,7 @@ internal/
   probe/               dns, tcp, port scan, tls, http probes + error classification
   result/              structured diagnostic result types (pure data, JSON ready)
   safety/              target checks for callers that don't own the target
+  netwatch/            scheduled checks of network targets, their status and alerts
 web/
   src/components/      charts (hand-written SVG), tiles, panels, status pills
   src/pages/           Dashboard, Performance, Analysis, Processes, Alerts, Settings
@@ -327,6 +358,9 @@ Each question is a paid API call on your Anthropic account. Answers typically ta
 | High CPU temperature | ≥ 85 °C for 30 s / ≥ 95 °C for 30 s | warning / critical |
 | High GPU temperature (per adapter) | ≥ 83 °C for 30 s / ≥ 90 °C for 30 s | warning / critical |
 | Sustained CPU load | 15-minute average ≥ 75 % | info |
+| Network target unreachable (per target) | down on `failuresBeforeAlert` (default 3) checks in a row | critical |
+| Network target slow (per target) | response ≥ `slowResponseMs` on `failuresBeforeAlert` checks in a row | warning |
+| TLS certificate expiring (per target) | ≤ 21 days / ≤ 7 days left, or expired | warning / critical |
 
 The engine (`internal/analyzer/alerts.go`) is a small deterministic state machine designed to avoid alert spam:
 
@@ -338,6 +372,8 @@ The engine (`internal/analyzer/alerts.go`) is a small deterministic state machin
 - **Restarts.** Alerts left open when the agent stopped are closed at the next start ("closed at restart"), because their state can't be known.
 - The sustained-load rule only evaluates once 90 % of its window has been observed.
 
+Network rules count consecutive checks instead of using sustain times, because a target produces one value per check interval. The unreachable and slow alerts resolve on the first good check. The certificate alert keeps its last known expiry through a failed check, so a short outage doesn't close and re-open it. A target that is removed has its alerts resolved.
+
 Every alert records rule, component, target, severity, title, human-readable reason, value, threshold, start, last update and resolution time.
 
 ## History and retention
@@ -345,9 +381,10 @@ Every alert records rule, component, target, severity, title, human-readable rea
 - Samples are collected every `sampleIntervalSeconds` (default 2 s) and kept at full resolution in memory for 30 minutes, which serves the 5m / 15m / 30m ranges and the rolling windows used for scoring.
 - Every `historyIntervalSeconds` (default 10 s) the buffered samples are **averaged into one SQLite row**. Peak CPU and GPU within the bucket are kept in separate columns, so short spikes still show as peaks. That is about 8,640 rows per day.
 - Drive fill level is written once per minute per drive.
+- Network checks are written one row per check per target.
 - Ranges of 1h and longer are read from SQLite and bucketed server-side to about 300 points.
-- **Retention:** every hour, samples, drive rows and *resolved* alerts older than `retentionDays` (default 7, max 90) are deleted.
-- **What is stored:** numeric metrics, drive mount points, and alert records. Process names, paths and command lines are **never** written to disk. Hostname is only shown live.
+- **Retention:** every hour, samples, drive rows, network checks and *resolved* alerts older than `retentionDays` (default 7, max 90) are deleted.
+- **What is stored:** numeric metrics, drive mount points, alert records, and for each network check its target id, status, timings, HTTP status, certificate days left and a one-line error. Process names, paths and command lines are **never** written to disk. Hostname is only shown live.
 - Location: `%APPDATA%\NetPulse\history.db` (override with `-data-dir`).
 
 ## API overview
@@ -414,6 +451,12 @@ Settings live in `%APPDATA%\NetPulse\config.json`. The file is optional: missing
 | `retentionDays` | `7` | 1–90 | |
 | `alertCooldownSeconds` | `300` | 0–3600 | |
 | `thresholds.*` | see [Alerts](#alerts) | | `warning`, `critical`, `sustainSeconds`; `sustainedCpu` has `averagePercent`, `windowMinutes` (≤ 25) |
+| `network.allowPrivateTargets` | `false` | | Allow loopback, LAN and other reserved addresses |
+| `network.checkIntervalSeconds` | `60` | 15–3600 | |
+| `network.failuresBeforeAlert` | `3` | 1–10 | Also used for the slow-response alert |
+| `network.slowResponseMs` | `1500` | 50–60000 | |
+| `network.certExpiry` | `21` / `7` days | 1–365 | `warningDays` ≥ `criticalDays` |
+| `network.targets` | `[]` | up to 25 | `id` (lowercase letters, digits, dashes), `name`, `target` (anything `netpulse scan` accepts) |
 
 Command-line flags:
 
@@ -485,6 +528,8 @@ What the tests cover:
 
 - **probe / engine / safety / cli:** DNS with a fake resolver, port parsing and the worker-pool scanner (loopback listeners), TCP error classification, verifying TLS against `httptest` certificates (expired, wrong host, self-signed), HTTP redirects and timings, target parsing, that `Options.Dialer` is used by every probe, the reserved-address and hostname blocklists including IPv4-mapped IPv6, and CLI flag handling. These need no internet access.
 - **cmd/netpulse and agent:** subcommand dispatch, help, unknown commands, and the legacy data-directory fallback.
+- **netwatch:** check classification for every outcome (DNS, TCP, TLS handshake and certificate failures, 5xx vs 4xx, slow responses, IP literals), scheduling on the interval and "check now", the unreachable alert opening only after N consecutive failures and resolving on recovery, the slow alert, certificate expiry escalating warning → critical under the same ID and surviving an outage, removed and re-pointed targets, and, with real sockets, a loopback HTTP server checked as up and the guard blocking it by default.
+- **network storage:** check bucketing and uptime counts with blocked checks excluded, pruning, and upgrading a version 1 database in place.
 - **analyzer:** scoring-rule boundaries, the worst-category cap, exclusion of unavailable categories, grade cut-offs, the alert sustain timer (including reset on a dip), escalation keeping the same ID, the hysteresis band, cooldown, resolution of vanished targets, rules skipped when sensors are missing, disk-space classification, and series summaries using peak columns.
 - **collector:** counter-rate and counter-reset handling, CPU busy-time math, memory underflow protection, the Task-Manager-equivalent GPU engine aggregation (per-engine summing, clamping, multi-adapter), LUID formatting matching PDH names, `nvidia-smi` parsing including `[N/A]`, CPU sensor selection and ACPI labelling, sensor back-off, per-interface network deltas with adapter resets, partition filtering (bind mounts, read-only images), process CPU % with PID reuse, panic recovery, and **real collection on the host running the tests**.
 - **storage** (temp databases): round-trip and bucketed averaging, peak preservation, retention pruning (keeping open alerts), alert upsert, restart cleanup, a corrupt database file, and a newer-schema guard.
@@ -553,10 +598,11 @@ Design choices that keep overhead low:
 - All telemetry is collected, analysed and stored locally. There is no telemetry upload, no analytics and no update check.
 - **Ask Pulse is the only feature that sends data off the machine**, and only when an API key is set *and* you ask a question. Each question sends the data listed in [Ask Pulse](#ask-pulse-ai-assistant) to the Anthropic API. The hostname, file paths and the history database are never sent. Leave `ANTHROPIC_API_KEY` unset to keep Net-Pulse fully offline.
 - The API is loopback-only by default, with host-header checks.
-- Network monitoring reads per-interface byte counters only. It never captures or inspects packets, connections, hostnames or URLs.
+- Throughput monitoring reads per-interface byte counters only. It never captures or inspects packets, connections, hostnames or URLs.
+- **Network targets are the agent's only other outbound connections**, and only to the hosts you add. Requests identify themselves with the `net-pulse/2.0` user agent.
 - The history database holds numeric metrics, drive mount points and alert records. Process names and paths appear live in the UI but are never persisted.
 - Deleting `%APPDATA%\NetPulse` removes all stored data.
-- Any off-device feature is opt-in and clearly labelled. Today that is Ask Pulse alone.
+- Any off-device feature is opt-in and clearly labelled: Ask Pulse, and checks of the network targets you configure.
 
 ## Roadmap
 

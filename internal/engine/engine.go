@@ -59,6 +59,10 @@ type Options struct {
 	// hook refuses private addresses, which is what covers DNS rebinding and
 	// redirects to internal hosts. The engine attaches no policy of its own.
 	Dialer *net.Dialer
+
+	// DisableProxy makes the HTTP check ignore proxy environment variables,
+	// so that Dialer sees the target's address rather than the proxy's.
+	DisableProxy bool
 }
 
 // DefaultOptions returns sensible defaults for interactive use.
@@ -208,6 +212,7 @@ func Run(ctx context.Context, target result.Target, opts Options) result.Report 
 				UserAgent:       opts.UserAgent,
 				RootCAs:         opts.RootCAs,
 				Dialer:          opts.Dialer,
+				DisableProxy:    opts.DisableProxy,
 			})
 			rep.HTTP = &httpRes
 		}

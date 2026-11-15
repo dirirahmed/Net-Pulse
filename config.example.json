@@ -12,5 +12,13 @@
     "cpuTemperature": { "warning": 85, "critical": 95, "sustainSeconds": 30 },
     "gpuTemperature": { "warning": 83, "critical": 90, "sustainSeconds": 30 },
     "sustainedCpu": { "averagePercent": 75, "windowMinutes": 15 }
+  },
+  "network": {
+    "allowPrivateTargets": false,
+    "checkIntervalSeconds": 60,
+    "failuresBeforeAlert": 3,
+    "slowResponseMs": 1500,
+    "certExpiry": { "warningDays": 21, "criticalDays": 7 },
+    "targets": []
   }
 }

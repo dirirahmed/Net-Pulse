@@ -18,7 +18,9 @@ import (
 	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
-const schemaVersion = 1
+// schemaVersion 2 added net_checks. Every statement in schema is
+// idempotent, so a version 1 database upgrades by running it again.
+const schemaVersion = 2
 
 const schema = `
 CREATE TABLE IF NOT EXISTS samples (
@@ -58,6 +60,20 @@ CREATE TABLE IF NOT EXISTS alerts (
 	resolved_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS alerts_started_at ON alerts (started_at);
+CREATE TABLE IF NOT EXISTS net_checks (
+	ts          INTEGER NOT NULL,
+	target      TEXT NOT NULL,
+	status      TEXT NOT NULL,
+	dns_ms      REAL,
+	connect_ms  REAL,
+	tls_ms      REAL,
+	ttfb_ms     REAL,
+	response_ms REAL,
+	http_status INTEGER,
+	cert_days   INTEGER,
+	problem     TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (target, ts)
+);
 `
 
 type Store struct {
@@ -247,6 +263,7 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (int64, error) {
 		`DELETE FROM samples WHERE ts < ?`,
 		`DELETE FROM disk_usage WHERE ts < ?`,
 		`DELETE FROM alerts WHERE resolved_at IS NOT NULL AND resolved_at < ?`,
+		`DELETE FROM net_checks WHERE ts < ?`,
 	} {
 		res, err := s.db.ExecContext(ctx, q, cutoff)
 		if err != nil {
@@ -258,9 +275,70 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (int64, error) {
 	return total, nil
 }
 
+// SaveNetCheck records one scheduled check of a monitored target.
+func (s *Store) SaveNetCheck(ctx context.Context, c models.NetCheck) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO net_checks
+		(ts, target, status, dns_ms, connect_ms, tls_ms, ttfb_ms, response_ms, http_status, cert_days, problem)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.Timestamp.Unix(), c.TargetID, string(c.Status), nullable(c.DNSMs), nullable(c.ConnectMs), nullable(c.TLSMs),
+		nullable(c.TTFBMs), nullable(c.ResponseMs), nullableInt(c.HTTPStatus), nullableInt(c.CertDaysLeft), c.Problem)
+	return err
+}
+
+// countedStatuses are the statuses that say something about the target.
+// Blocked and pending checks are left out of uptime and charts.
+const countedStatuses = `('up', 'degraded', 'down')`
+
+// QueryNetChecks returns one target's checks between from and to, grouped
+// into buckets of the given width, oldest first.
+func (s *Store) QueryNetChecks(ctx context.Context, target string, from, to time.Time, bucket time.Duration) ([]models.NetCheckPoint, error) {
+	width := max(int64(bucket.Seconds()), 1)
+	rows, err := s.db.QueryContext(ctx, `SELECT (ts / ?) * ? AS b, COUNT(*),
+			SUM(status = 'up'), SUM(status = 'degraded'), SUM(status = 'down'),
+			AVG(response_ms), MAX(response_ms)
+		FROM net_checks WHERE target = ? AND ts >= ? AND ts <= ? AND status IN `+countedStatuses+`
+		GROUP BY b ORDER BY b`,
+		width, width, target, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.NetCheckPoint{}
+	for rows.Next() {
+		var ts int64
+		var p models.NetCheckPoint
+		var avg, peak sql.NullFloat64
+		if err := rows.Scan(&ts, &p.Checks, &p.Up, &p.Degraded, &p.Down, &avg, &peak); err != nil {
+			return nil, err
+		}
+		p.Timestamp = time.Unix(ts, 0).UTC()
+		p.AvgResponseMs, p.MaxResponseMs = fromNull(avg), fromNull(peak)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// NetUptime counts one target's checks since the given time.
+func (s *Store) NetUptime(ctx context.Context, target string, since time.Time) (models.NetUptime, error) {
+	var u models.NetUptime
+	var up, degraded, down sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), SUM(status = 'up'), SUM(status = 'degraded'), SUM(status = 'down')
+		FROM net_checks WHERE target = ? AND ts >= ? AND status IN `+countedStatuses,
+		target, since.Unix()).Scan(&u.Checks, &up, &degraded, &down)
+	u.Up, u.Degraded, u.Down = int(up.Int64), int(degraded.Int64), int(down.Int64)
+	return u, err
+}
+
 var ErrUnavailable = errors.New("history storage is unavailable")
 
 func nullable(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullableInt(v *int) any {
 	if v == nil {
 		return nil
 	}

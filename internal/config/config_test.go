@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,7 @@ func TestDefaultsAreValid(t *testing.T) {
 
 func TestLoadMissingFileGivesDefaults(t *testing.T) {
 	cfg, err := Load(filepath.Join(t.TempDir(), "nope.json"))
-	if err != nil || cfg != Default() {
+	if err != nil || !reflect.DeepEqual(cfg, Default()) {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)
 	}
 }
@@ -42,7 +43,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "retentionDays") {
 		t.Fatalf("expected retentionDays error, got %v", err)
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Error("invalid file should fall back to defaults")
 	}
 }
@@ -85,7 +86,60 @@ func TestExampleConfigMatchesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Errorf("config.example.json differs from Default():\n%+v\n%+v", cfg, Default())
+	}
+}
+
+func validNetwork() Config {
+	c := Default()
+	c.Network.Targets = []NetTarget{
+		{ID: "site", Name: "My site", Target: "https://example.com/health"},
+		{ID: "dns-1", Name: "Cloudflare DNS", Target: "1.1.1.1:53"},
+	}
+	return c
+}
+
+func TestNetworkTargetsValidate(t *testing.T) {
+	if err := validNetwork().Validate(); err != nil {
+		t.Fatalf("valid targets rejected: %v", err)
+	}
+	cases := map[string]func(*Config){
+		"id must be":           func(c *Config) { c.Network.Targets[0].ID = "Bad ID" },
+		"used more than once":  func(c *Config) { c.Network.Targets[1].ID = "site" },
+		"name must be":         func(c *Config) { c.Network.Targets[0].Name = "  " },
+		"targets[1].target":    func(c *Config) { c.Network.Targets[1].Target = "ftp://example.com" },
+		"checkIntervalSeconds": func(c *Config) { c.Network.CheckIntervalSeconds = 5 },
+		"warningDays":          func(c *Config) { c.Network.CertExpiry.WarningDays = 3 },
+		"at most":              func(c *Config) { c.Network.Targets = make([]NetTarget, MaxTargets+1) },
+	}
+	for want, mutate := range cases {
+		c := validNetwork()
+		mutate(&c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v", want, err)
+		}
+	}
+}
+
+func TestStoreGetReturnsIndependentCopy(t *testing.T) {
+	s := NewStore("", validNetwork())
+	got := s.Get()
+	got.Network.Targets[0].Name = "changed"
+	got.Network.Targets = append(got.Network.Targets[:0], NetTarget{ID: "x", Name: "x", Target: "x.io"})
+	if s.Get().Network.Targets[0].Name != "My site" {
+		t.Fatal("modifying a Get() result changed the stored config")
+	}
+}
+
+func TestLoadNullTargetsMeansNone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(path, []byte(`{"network": {"targets": null}}`), 0o644)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Network.Targets == nil || len(cfg.Network.Targets) != 0 {
+		t.Fatalf("targets = %#v, want empty slice", cfg.Network.Targets)
 	}
 }

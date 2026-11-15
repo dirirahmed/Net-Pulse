@@ -8,7 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
+	"unicode/utf8"
+
+	"github.com/dirirahmed/Net-Pulse/internal/engine"
 )
 
 // Threshold is a two-level alert threshold. For "above" metrics (usage,
@@ -36,6 +41,39 @@ type Thresholds struct {
 	SustainedCPU    SustainedLoad `json:"sustainedCpu"`
 }
 
+// CertExpiry raises an alert when a monitored target's TLS certificate is
+// about to expire.
+type CertExpiry struct {
+	WarningDays  int `json:"warningDays"`
+	CriticalDays int `json:"criticalDays"`
+}
+
+// NetTarget is one host or URL the agent checks on a schedule. Target takes
+// any form `netpulse scan` accepts: a hostname, host:port, IP or URL.
+type NetTarget struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+// Network configures scheduled monitoring and on-demand diagnostics.
+type Network struct {
+	// AllowPrivateTargets lets scans and monitored targets reach loopback,
+	// private (LAN) and other reserved addresses. Off by default: anything
+	// that accepts a target over HTTP must not be a way into the network
+	// around the machine it runs on.
+	AllowPrivateTargets  bool        `json:"allowPrivateTargets"`
+	CheckIntervalSeconds int         `json:"checkIntervalSeconds"`
+	FailuresBeforeAlert  int         `json:"failuresBeforeAlert"`
+	SlowResponseMs       int         `json:"slowResponseMs"`
+	CertExpiry           CertExpiry  `json:"certExpiry"`
+	Targets              []NetTarget `json:"targets"`
+}
+
+// MaxTargets bounds scheduled work: every target costs a few connections
+// per check interval.
+const MaxTargets = 25
+
 type Config struct {
 	ListenAddress          string     `json:"listenAddress"`
 	Port                   int        `json:"port"`
@@ -44,6 +82,15 @@ type Config struct {
 	RetentionDays          int        `json:"retentionDays"`
 	AlertCooldownSeconds   int        `json:"alertCooldownSeconds"`
 	Thresholds             Thresholds `json:"thresholds"`
+	Network                Network    `json:"network"`
+}
+
+// Clone returns a deep copy. Config holds a slice, so a plain struct copy
+// would share it with the original; handlers decode request bodies into the
+// copy they get from Store.Get, which must never touch the live config.
+func (c Config) Clone() Config {
+	c.Network.Targets = append([]NetTarget{}, c.Network.Targets...)
+	return c
 }
 
 func Default() Config {
@@ -61,6 +108,14 @@ func Default() Config {
 			CPUTemperature:  Threshold{Warning: 85, Critical: 95, SustainSeconds: 30},
 			GPUTemperature:  Threshold{Warning: 83, Critical: 90, SustainSeconds: 30},
 			SustainedCPU:    SustainedLoad{AveragePercent: 75, WindowMinutes: 15},
+		},
+		Network: Network{
+			AllowPrivateTargets:  false,
+			CheckIntervalSeconds: 60,
+			FailuresBeforeAlert:  3,
+			SlowResponseMs:       1500,
+			CertExpiry:           CertExpiry{WarningDays: 21, CriticalDays: 7},
+			Targets:              []NetTarget{},
 		},
 	}
 }
@@ -96,7 +151,50 @@ func (c Config) Validate() error {
 	check(t.SustainedCPU.AveragePercent > 0 && t.SustainedCPU.AveragePercent <= 100, "sustainedCpu.averagePercent must be in (0, 100]")
 	check(t.SustainedCPU.WindowMinutes >= 1 && t.SustainedCPU.WindowMinutes <= 25,
 		"sustainedCpu.windowMinutes must be between 1 and 25")
+	errs = append(errs, c.Network.validate()...)
 	return errors.Join(errs...)
+}
+
+var targetIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+
+func (n Network) validate() []error {
+	var errs []error
+	check := func(ok bool, format string, args ...any) {
+		if !ok {
+			errs = append(errs, fmt.Errorf(format, args...))
+		}
+	}
+	check(n.CheckIntervalSeconds >= 15 && n.CheckIntervalSeconds <= 3600, "network.checkIntervalSeconds must be between 15 and 3600")
+	check(n.FailuresBeforeAlert >= 1 && n.FailuresBeforeAlert <= 10, "network.failuresBeforeAlert must be between 1 and 10")
+	check(n.SlowResponseMs >= 50 && n.SlowResponseMs <= 60000, "network.slowResponseMs must be between 50 and 60000")
+	check(n.CertExpiry.CriticalDays >= 1 && n.CertExpiry.CriticalDays <= 365, "network.certExpiry.criticalDays must be between 1 and 365")
+	check(n.CertExpiry.WarningDays >= n.CertExpiry.CriticalDays && n.CertExpiry.WarningDays <= 365,
+		"network.certExpiry.warningDays must be >= criticalDays and <= 365")
+	check(len(n.Targets) <= MaxTargets, "network.targets: at most %d targets", MaxTargets)
+
+	seen := map[string]bool{}
+	for i, t := range n.Targets {
+		where := fmt.Sprintf("network.targets[%d]", i)
+		check(targetIDPattern.MatchString(t.ID), "%s.id must be 1-40 lowercase letters, digits or dashes", where)
+		check(!seen[t.ID], "%s.id %q is used more than once", where, t.ID)
+		seen[t.ID] = true
+		name := strings.TrimSpace(t.Name)
+		check(name != "" && utf8.RuneCountInString(name) <= 60, "%s.name must be 1-60 characters", where)
+		if _, err := engine.ParseTarget(t.Target); err != nil {
+			errs = append(errs, fmt.Errorf("%s.target: %w", where, err))
+		}
+	}
+	return errs
+}
+
+// TargetByID returns the configured target with that id.
+func (n Network) TargetByID(id string) (NetTarget, bool) {
+	for _, t := range n.Targets {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return NetTarget{}, false
 }
 
 // Load reads a config file. A missing file yields defaults; fields absent
@@ -112,6 +210,10 @@ func Load(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Default(), fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if cfg.Network.Targets == nil {
+		// "targets": null in a hand-edited file means none, not "invalid".
+		cfg.Network.Targets = []NetTarget{}
 	}
 	if err := cfg.Validate(); err != nil {
 		return Default(), fmt.Errorf("invalid config %s: %w", path, err)
@@ -147,10 +249,11 @@ func NewStore(path string, cfg Config) *Store {
 	return &Store{cfg: cfg, path: path}
 }
 
+// Get returns a deep copy that the caller may modify freely.
 func (s *Store) Get() Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.cfg
+	return s.cfg.Clone()
 }
 
 // Update validates, persists and then applies cfg. Listen address and port
@@ -166,6 +269,6 @@ func (s *Store) Update(cfg Config) error {
 			return fmt.Errorf("save config: %w", err)
 		}
 	}
-	s.cfg = cfg
+	s.cfg = cfg.Clone()
 	return nil
 }
