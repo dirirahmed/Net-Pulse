@@ -7,6 +7,8 @@ Net-Pulse is a local system-health, performance and network-diagnostics tool in 
 
 Both share one codebase: the same engine that powers the CLI is a library the agent can call, and the agent's analysis and optional AI assistant ("Ask Pulse") sit on top of everything it measures.
 
+**[Live demo](https://netpulse-demo-vv4p.onrender.com/)** · **[Download](https://github.com/dirirahmed/Net-Pulse/releases/latest)** · The demo monitors the small cloud server it runs on and is read-only; it sleeps when idle, so the first visit can take about a minute to load.
+
 > **Telemetry stays on your machine by default.** The agent listens only on `127.0.0.1`. Its only outbound connections are to network targets you add yourself and, if you enable it, Ask Pulse. See [Privacy](#privacy).
 
 ![Dashboard](docs/screenshots/dashboard-dark-1440.png)
