@@ -19,6 +19,16 @@ func TestHelpListsCommands(t *testing.T) {
 	}
 }
 
+func TestVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"version"}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "netpulse dev" {
+		t.Errorf("version output = %q", got)
+	}
+}
+
 func TestUnknownCommandIsRejected(t *testing.T) {
 	var out, errOut bytes.Buffer
 	err := run(context.Background(), []string{"sevre"}, &out, &errOut)

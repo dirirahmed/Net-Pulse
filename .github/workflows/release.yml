@@ -1,0 +1,77 @@
+name: Release
+
+# Push a version tag to publish a release:
+#   git tag v3.0.0 && git push origin v3.0.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build and test the dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
+      # The dashboard in web/dist is embedded into every binary. SQLite is a
+      # pure-Go (WebAssembly) build, so no cgo or C toolchain is needed for
+      # any target. macOS is left out until the collectors are verified there;
+      # it can still be built from source.
+      - name: Build binaries
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          mkdir -p build dist
+          for target in windows/amd64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            ext=""; [ "$os" = windows ] && ext=".exe"
+            name="netpulse_${version}_${os}_${arch}"
+            mkdir -p "build/$name"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${version}" \
+              -o "build/$name/netpulse$ext" ./cmd/netpulse
+            cp README.md config.example.json "build/$name/"
+            if [ "$os" = windows ]; then
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -C build -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -l dist
+
+      - name: Smoke-test the Linux binary
+        run: |
+          set -euo pipefail
+          tar -xzf "dist/netpulse_${GITHUB_REF_NAME}_linux_amd64.tar.gz" -C build
+          "build/netpulse_${GITHUB_REF_NAME}_linux_amd64/netpulse" version | grep -qx "netpulse ${GITHUB_REF_NAME}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Net-Pulse $GITHUB_REF_NAME" \
+            --generate-notes --verify-tag

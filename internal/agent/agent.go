@@ -29,6 +29,9 @@ import (
 	"github.com/dirirahmed/Net-Pulse/web"
 )
 
+// Version is the build version, set by cmd/netpulse; logged at start-up.
+var Version = "dev"
+
 // Run parses the serve flags and runs the agent until ctx is cancelled.
 func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("netpulse serve", flag.ContinueOnError)
@@ -140,7 +143,7 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	}()
 
 	url := "http://" + dashboardHost(cfg.ListenAddress) + ":" + strconv.Itoa(cfg.Port)
-	log.Info("Net-Pulse running", "dashboard", url, "data", *dataDir)
+	log.Info("Net-Pulse running", "version", Version, "dashboard", url, "data", *dataDir)
 	if *openBrowser && bundled {
 		openURL(url)
 	}

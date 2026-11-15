@@ -20,6 +20,11 @@ import (
 	"github.com/dirirahmed/Net-Pulse/internal/cli"
 )
 
+// version is set at build time by the release workflow:
+//
+//	go build -ldflags "-X main.version=v3.0.0" ./cmd/netpulse
+var version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -36,7 +41,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	switch args[0] {
 	case "serve":
+		agent.Version = version
 		return agent.Run(ctx, args[1:], stderr)
+	case "version", "-version", "--version":
+		fmt.Fprintln(stdout, "netpulse", version)
+		return nil
 	case "scan":
 		return cli.Run(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
@@ -64,6 +73,7 @@ Usage:
   netpulse scan [flags] <target>   run network diagnostics once and print the report
   netpulse serve [flags]           run the monitoring agent and dashboard
   netpulse <target>                shorthand for scan
+  netpulse version                 print the version
 
 Run "netpulse scan -h" or "netpulse serve -h" for each command's flags.
 `)

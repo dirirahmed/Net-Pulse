@@ -32,6 +32,7 @@ _The screenshots were captured before PC Sentinel merged into Net-Pulse, so they
 
 ## Contents
 
+- [Install](#install)
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Network diagnostics: `netpulse scan`](#network-diagnostics-netpulse-scan)
@@ -55,6 +56,23 @@ _The screenshots were captured before PC Sentinel merged into Net-Pulse, so they
 - [Privacy](#privacy)
 - [Roadmap](#roadmap)
 - [Project history](#project-history)
+
+## Install
+
+Download the archive for your system from the [latest release](https://github.com/dirirahmed/Net-Pulse/releases/latest), unpack it and run the binary. The dashboard is built into it, so there is nothing else to install.
+
+| System | File |
+| --- | --- |
+| Windows 10/11 x64 | `netpulse_<version>_windows_amd64.zip` |
+| Linux x64 | `netpulse_<version>_linux_amd64.tar.gz` |
+| Linux ARM64 (e.g. Raspberry Pi 4/5) | `netpulse_<version>_linux_arm64.tar.gz` |
+
+```powershell
+.\netpulse.exe serve          # dashboard on http://127.0.0.1:8787
+.\netpulse.exe version
+```
+
+`SHA256SUMS.txt` in each release lists the archive checksums (`Get-FileHash .\netpulse_*.zip` on Windows, `sha256sum -c SHA256SUMS.txt` on Linux). The Windows binary isn't code-signed, so SmartScreen may warn on first run: choose **More info → Run anyway**. macOS isn't packaged yet; build it from source as below.
 
 ## Quick start
 
@@ -519,6 +537,13 @@ cd web; npm run dev                     # terminal 2: UI on http://localhost:517
 
 If you build the Go binary without building `web/` first, it runs in API-only mode and logs a warning.
 
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) when a version tag is pushed. It runs the frontend and Go tests, builds the binaries with the version stamped in, smoke-tests the Linux build and publishes a GitHub Release with the archives and checksums:
+
+```bash
+git tag v3.0.0
+git push origin v3.0.0
+```
+
 Formatting and checks:
 
 ```
@@ -542,7 +567,7 @@ cd web && npm test
 What the tests cover:
 
 - **probe / engine / safety / cli:** DNS with a fake resolver, port parsing and the worker-pool scanner (loopback listeners), TCP error classification, verifying TLS against `httptest` certificates (expired, wrong host, self-signed), HTTP redirects and timings, target parsing, that `Options.Dialer` is used by every probe, the reserved-address and hostname blocklists including IPv4-mapped IPv6, and CLI flag handling. These need no internet access.
-- **cmd/netpulse and agent:** subcommand dispatch, help, unknown commands, and the legacy data-directory fallback.
+- **cmd/netpulse and agent:** subcommand dispatch, help, `version`, unknown commands, and the legacy data-directory fallback.
 - **netwatch:** check classification for every outcome (DNS, TCP, TLS handshake and certificate failures, 5xx vs 4xx, slow responses, IP literals), scheduling on the interval and "check now", the unreachable alert opening only after N consecutive failures and resolving on recovery, the slow alert, certificate expiry escalating warning → critical under the same ID and surviving an outage, removed and re-pointed targets, and, with real sockets, a loopback HTTP server checked as up and the guard blocking it by default.
 - **network storage:** check bucketing and uptime counts with blocked checks excluded, pruning, and upgrading a version 1 database in place.
 - **analyzer:** scoring-rule boundaries, the worst-category cap, exclusion of unavailable categories, grade cut-offs, the alert sustain timer (including reset on a dip), escalation keeping the same ID, the hysteresis band, cooldown, resolution of vanished targets, rules skipped when sensors are missing, disk-space classification, and series summaries using peak columns.
@@ -608,7 +633,6 @@ Design choices that keep overhead low:
 - Per-process GPU, disk and network usage aren't shown.
 - History averages hide spikes shorter than the bucket, except for CPU and GPU, which keep bucket peaks. Memory peak for long ranges is the peak of the bucket averages.
 - Single user and single machine. Binding to a non-loopback address is possible, but there is no authentication, so it isn't recommended.
-- `web/` has no `package-lock.json` in the repository yet; the first `npm install` creates one, and it should be committed.
 
 ## Privacy
 
