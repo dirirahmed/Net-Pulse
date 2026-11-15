@@ -1,9 +1,9 @@
 # Convenience targets. On Windows without make, run the commands directly
 # (see README "Building").
 
-BIN := bin/pcsentinel$(if $(filter Windows_NT,$(OS)),.exe,)
+BIN := bin/netpulse$(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: build web go test test-go test-web vet fmt run clean windows
+.PHONY: build web go test test-go test-web bench vet fmt run clean windows
 
 build: web go
 
@@ -11,16 +11,19 @@ web:
 	cd web && npm install && npm run build
 
 go:
-	go build -trimpath -ldflags "-s -w" -o $(BIN) ./cmd/pcsentinel
+	go build -trimpath -ldflags "-s -w" -o $(BIN) ./cmd/netpulse
 
 windows: web
-	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/pcsentinel.exe ./cmd/pcsentinel
+	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/netpulse.exe ./cmd/netpulse
 
 test: test-go test-web
 
 test-go: vet
 	go test ./...
 	go test -race ./...
+
+bench:
+	go test -run=^$$ -bench=. ./internal/probe
 
 test-web:
 	cd web && npm test
@@ -30,7 +33,7 @@ vet:
 	go vet ./...
 
 run: go
-	$(BIN) -open=false
+	$(BIN) serve -open=false
 
 clean:
 	rm -rf bin web/dist/assets web/dist/index.html web/dist/favicon.svg

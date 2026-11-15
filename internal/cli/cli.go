@@ -23,7 +23,7 @@ const DefaultTarget = "8.8.8.8"
 
 // Run parses args, runs one scan and writes the report to stdout.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("net-pulse", flag.ContinueOnError)
+	fs := flag.NewFlagSet("netpulse scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var (
@@ -43,8 +43,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "net-pulse v2 - network diagnostics engine\n\n")
-		fmt.Fprintf(stderr, "Usage:\n  net-pulse [flags] <target>\n\n")
+		fmt.Fprintf(stderr, "netpulse scan - network diagnostics\n\n")
+		fmt.Fprintf(stderr, "Usage:\n  netpulse scan [flags] <target>\n\n")
 		fmt.Fprintf(stderr, "Targets:\n")
 		fmt.Fprintf(stderr, "  8.8.8.8            example.com            example.com:8443\n")
 		fmt.Fprintf(stderr, "  https://example.com/health\n\n")

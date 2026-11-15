@@ -49,4 +49,4 @@ jobs:
         run: go test -run=^$ -bench=. -benchtime=1x ./internal/probe
 
       - name: Build
-        run: go build -trimpath -o bin/ ./...
+        run: go build -trimpath -o bin/ ./cmd/netpulse

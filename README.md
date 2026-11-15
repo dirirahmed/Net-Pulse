@@ -48,10 +48,10 @@ errors.
 ### Usage
 
 ```bash
-go run . example.com
-go run . https://example.com/health
-go run . -checks dns,tls -ports 443,8443 example.com
-go run . -json 1.1.1.1 > scan.json
+go run ./cmd/netpulse example.com
+go run ./cmd/netpulse scan https://example.com/health
+go run ./cmd/netpulse scan -checks dns,tls -ports 443,8443 example.com
+go run ./cmd/netpulse scan -json 1.1.1.1 > scan.json
 ```
 
 Flags:
@@ -77,7 +77,7 @@ Running with no target keeps the V1 behaviour and scans `8.8.8.8`.
 ### Layout
 
 ```
-main.go                     entry point only
+cmd/netpulse/                single binary: `netpulse scan` (CLI) and `netpulse serve` (agent)
 internal/result/            structured result types (pure data, JSON ready)
 internal/probe/             dns, tcp, scan, tls, http probes + error classification
 internal/engine/            target parsing and orchestration into one Report
@@ -232,8 +232,9 @@ Still deliberately out of scope: automatic optimisation, process termination, re
 ```
 
 ```
-cmd/pcsentinel/        entry point: flags, wiring, graceful shutdown
+cmd/netpulse/          single binary: `scan` and `serve` subcommands
 internal/
+  agent/               `serve`: flags, wiring, graceful shutdown
   collector/           telemetry sources; *_windows.go holds PDH, DXGI and drive-type code
   analyzer/            health scoring, alert state machine, series summaries, performance analysis (V2)
   ai/                  optional Anthropic API client for Ask Sentinel (V2), isolated from monitoring
@@ -352,7 +353,7 @@ The system prompt tells the model to base every statement on that data, quote th
 ```powershell
 # PowerShell, current session only
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
-.\bin\pcsentinel.exe
+.\bin\netpulse.exe serve
 
 # Or persist it for your user account (open a new terminal afterwards)
 setx ANTHROPIC_API_KEY "sk-ant-..."
@@ -475,7 +476,7 @@ Settings live in `%APPDATA%\PCSentinel\config.json`. The file is optional: missi
 Command-line flags:
 
 ```
-pcsentinel.exe [-data-dir DIR] [-config FILE] [-port N] [-open=false]
+netpulse.exe serve [-data-dir DIR] [-config FILE] [-port N] [-open=false]
 ```
 
 `-open` (default on Windows) opens the dashboard in your browser at startup.
@@ -495,10 +496,10 @@ npm run build
 cd ..
 
 # 2. Build the agent
-go build -trimpath -ldflags "-s -w" -o bin\pcsentinel.exe .\cmd\pcsentinel
+go build -trimpath -ldflags "-s -w" -o bin\netpulse.exe .\cmd\netpulse
 
 # 3. Run it (opens http://127.0.0.1:8787)
-.\bin\pcsentinel.exe
+.\bin\netpulse.exe serve
 ```
 
 Stop with `Ctrl+C`. Buffered history is flushed and the database closed on shutdown. Running as Administrator is optional: it can make CPU temperature and a few protected process paths readable, but everything else works without it.
@@ -510,7 +511,7 @@ You can also cross-compile the Windows binary from Linux or macOS: `make windows
 Run the agent and the Vite dev server side by side. Vite proxies `/api` to the agent and gives hot reload:
 
 ```powershell
-go run ./cmd/pcsentinel -open=false     # terminal 1: API on :8787
+go run ./cmd/netpulse serve -open=false    # terminal 1: API on :8787
 cd web; npm run dev                     # terminal 2: UI on http://localhost:5173
 ```
 

@@ -1,22 +1,22 @@
-// Command pcsentinel runs the PC Sentinel monitoring agent and serves the
-// dashboard on a local-only HTTP port.
-package main
+// Package agent runs the long-lived monitoring agent behind `netpulse serve`:
+// it wires the collectors, monitor, history database, API and embedded
+// dashboard together and serves them on a local-only HTTP port.
+package agent
 
 import (
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/dirirahmed/Net-Pulse/internal/ai"
@@ -28,21 +28,29 @@ import (
 	"github.com/dirirahmed/Net-Pulse/web"
 )
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "pcsentinel:", err)
-		os.Exit(1)
+// Run parses the serve flags and runs the agent until ctx is cancelled.
+func Run(ctx context.Context, args []string, stderr io.Writer) error {
+	fs := flag.NewFlagSet("netpulse serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dataDir := fs.String("data-dir", defaultDataDir(), "directory for config.json and the history database")
+	configPath := fs.String("config", "", "config file path (default <data-dir>/config.json)")
+	port := fs.Int("port", 0, "override the configured API port")
+	openBrowser := fs.Bool("open", runtime.GOOS == "windows", "open the dashboard in the default browser on start")
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "Usage:\n  netpulse serve [flags]\n\nRuns the monitoring agent and serves the dashboard.\n\nFlags:\n")
+		fs.PrintDefaults()
 	}
-}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("serve takes no arguments, got %q", fs.Args())
+	}
 
-func run() error {
-	dataDir := flag.String("data-dir", defaultDataDir(), "directory for config.json and the history database")
-	configPath := flag.String("config", "", "config file path (default <data-dir>/config.json)")
-	port := flag.Int("port", 0, "override the configured API port")
-	openBrowser := flag.Bool("open", runtime.GOOS == "windows", "open the dashboard in the default browser on start")
-	flag.Parse()
-
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if *configPath == "" {
 		*configPath = filepath.Join(*dataDir, "config.json")
 	}
@@ -64,10 +72,10 @@ func run() error {
 	addr := net.JoinHostPort(cfg.ListenAddress, strconv.Itoa(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("listen on %s (is PC Sentinel already running?): %w", addr, err)
+		return fmt.Errorf("listen on %s (is the agent already running?): %w", addr, err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
 	var store monitor.Store
@@ -94,7 +102,7 @@ func run() error {
 	if !bundled {
 		log.Warn("frontend not bundled; API only (run `npm run build` in web/ before `go build` to embed it)")
 	}
-	// Ask Sentinel (V2) is optional: without an API key it stays off and
+	// Ask Sentinel is optional: without an API key it stays off and
 	// monitoring is unaffected. The key is only read here, never logged.
 	assistant := ai.New(ai.ConfigFromEnv())
 	if assistant.Enabled() {
