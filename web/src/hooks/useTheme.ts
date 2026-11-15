@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export type ThemePref = "system" | "dark" | "light";
-const KEY = "pcsentinel.theme";
+const KEY = "netpulse.theme";
 
 function read(): ThemePref {
   try {

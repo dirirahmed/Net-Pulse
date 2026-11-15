@@ -126,7 +126,7 @@ type HostInfo struct {
 	BootTime        time.Time `json:"bootTime"`
 }
 
-// AgentStats describes PC Sentinel's own resource usage.
+// AgentStats describes the agent's own resource usage.
 type AgentStats struct {
 	PID                  int     `json:"pid"`
 	CPUPercent           float64 `json:"cpuPercent"`

@@ -23,6 +23,7 @@ web/dist/*
 *.db-journal
 /config.json
 /data/
+netpulse-data/
 pcsentinel-data/
 
 # Secrets

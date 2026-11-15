@@ -102,13 +102,13 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	if !bundled {
 		log.Warn("frontend not bundled; API only (run `npm run build` in web/ before `go build` to embed it)")
 	}
-	// Ask Sentinel is optional: without an API key it stays off and
+	// Ask Pulse is optional: without an API key it stays off and
 	// monitoring is unaffected. The key is only read here, never logged.
 	assistant := ai.New(ai.ConfigFromEnv())
 	if assistant.Enabled() {
-		log.Info("Ask Sentinel enabled", "model", assistant.Model())
+		log.Info("Ask Pulse enabled", "model", assistant.Model())
 	} else {
-		log.Info("Ask Sentinel disabled; set " + ai.EnvAPIKey + " to enable it")
+		log.Info("Ask Pulse disabled; set " + ai.EnvAPIKey + " to enable it")
 	}
 	srv := &http.Server{
 		Handler:           api.New(mon, cfgStore, static, log).WithAssistant(assistant).Handler(),
@@ -128,7 +128,7 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	}()
 
 	url := "http://" + dashboardHost(cfg.ListenAddress) + ":" + strconv.Itoa(cfg.Port)
-	log.Info("PC Sentinel running", "dashboard", url, "data", *dataDir)
+	log.Info("Net-Pulse running", "dashboard", url, "data", *dataDir)
 	if *openBrowser && bundled {
 		openURL(url)
 	}
@@ -142,11 +142,31 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	return nil
 }
 
+// Data directory names under the user config dir (%APPDATA% on Windows).
+const (
+	dataDirName       = "NetPulse"
+	legacyDataDirName = "PCSentinel" // used before PC Sentinel merged into Net-Pulse
+)
+
 func defaultDataDir() string {
-	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "PCSentinel")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "netpulse-data"
 	}
-	return "pcsentinel-data"
+	return pickDataDir(dir)
+}
+
+// pickDataDir keeps an existing PC Sentinel install's settings and history:
+// the legacy directory is reused until a NetPulse directory exists.
+func pickDataDir(base string) string {
+	current := filepath.Join(base, dataDirName)
+	legacy := filepath.Join(base, legacyDataDirName)
+	if _, err := os.Stat(current); err != nil {
+		if info, err := os.Stat(legacy); err == nil && info.IsDir() {
+			return legacy
+		}
+	}
+	return current
 }
 
 func dashboardHost(listen string) string {

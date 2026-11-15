@@ -20,7 +20,7 @@ const (
 )
 
 // ProcessSampler lists processes on demand. Enumerating every process is the
-// most expensive thing PC Sentinel does, so it only runs while someone is
+// most expensive thing the agent does, so it only runs while someone is
 // looking at the process page, and results are cached briefly so several
 // open tabs don't multiply the cost.
 type ProcessSampler struct {

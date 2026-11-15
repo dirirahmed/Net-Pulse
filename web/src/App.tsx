@@ -47,7 +47,7 @@ export function App() {
   const title = NAV.find((n) => n.route === route)?.label ?? "Dashboard";
 
   useEffect(() => {
-    document.title = activeCount > 0 ? `(${activeCount}) PC Sentinel` : "PC Sentinel";
+    document.title = activeCount > 0 ? `(${activeCount}) Net-Pulse` : "Net-Pulse";
   }, [activeCount]);
 
   const onSaved = (c: Config) => setIntervalMs(c.sampleIntervalSeconds * 1000);
@@ -57,7 +57,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <Logo />
-          <span>PC Sentinel</span>
+          <span>Net-Pulse</span>
         </div>
         <nav>
           {NAV.map(({ route: r, label, Icon }) => (
@@ -103,7 +103,7 @@ export function App() {
 
         {system.error && (
           <Banner tone="critical">
-            {system.error}. {sys ? "Showing the last values received; retrying automatically." : "Make sure pcsentinel is running."}
+            {system.error}. {sys ? "Showing the last values received; retrying automatically." : "Make sure `netpulse serve` is running."}
           </Banner>
         )}
 

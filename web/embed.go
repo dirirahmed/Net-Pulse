@@ -1,5 +1,5 @@
 // Package web embeds the built React frontend (web/dist) into the Go binary
-// so PC Sentinel ships as a single executable.
+// so Net-Pulse ships as a single executable.
 package web
 
 import (

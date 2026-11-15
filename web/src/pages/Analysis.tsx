@@ -51,7 +51,7 @@ export function Analysis() {
           </Panel>
         </>
       )}
-      {data && <AskSentinel ai={data.ai} />}
+      {data && <AskPulse ai={data.ai} />}
     </div>
   );
 }
@@ -122,7 +122,7 @@ function FindingList({ findings }: { findings: Finding[] }) {
   );
 }
 
-function AskSentinel({ ai }: { ai: AIStatus }) {
+function AskPulse({ ai }: { ai: AIStatus }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -172,7 +172,7 @@ function AskSentinel({ ai }: { ai: AIStatus }) {
 
   return (
     <Panel
-      title="Ask Sentinel"
+      title="Ask Pulse"
       aside={
         ai.enabled ? (
           <span className="panel-aside-row">
@@ -203,13 +203,13 @@ function AskSentinel({ ai }: { ai: AIStatus }) {
             <div className="chat-log" ref={logRef} aria-live="polite">
               {messages.map((m) => (
                 <div key={m.id} className={`chat-msg ${m.role} ${m.error ? "error" : ""}`}>
-                  <div className="chat-who">{m.role === "user" ? "You" : m.error ? "Error" : "Sentinel"}</div>
+                  <div className="chat-who">{m.role === "user" ? "You" : m.error ? "Error" : "Pulse"}</div>
                   <div className="chat-text">{m.content}</div>
                 </div>
               ))}
               {pending && (
                 <div className="chat-msg assistant">
-                  <div className="chat-who">Sentinel</div>
+                  <div className="chat-who">Pulse</div>
                   <div className="chat-text muted">Looking at your PC's data…</div>
                 </div>
               )}
@@ -226,7 +226,7 @@ function AskSentinel({ ai }: { ai: AIStatus }) {
               placeholder="Ask about your PC's performance…"
               rows={2}
               maxLength={MAX_QUESTION_CHARS}
-              aria-label="Question for Sentinel"
+              aria-label="Question for Pulse"
             />
             <button type="submit" className="btn primary btn-icon" disabled={pending || !input.trim()}>
               <IconSend />
@@ -236,7 +236,7 @@ function AskSentinel({ ai }: { ai: AIStatus }) {
           <div className="chat-foot small">
             {inputError ? <span className="tone-text-critical">{inputError}</span> : <span />}
             <span className="muted">
-              Answers use only PC Sentinel's measurements. Asking sends your question, the findings and usage figures, hardware names and
+              Answers use only Net-Pulse's measurements. Asking sends your question, the findings and usage figures, hardware names and
               top program names (no file paths or hostname) to Anthropic.
             </span>
           </div>

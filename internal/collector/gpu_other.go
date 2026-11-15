@@ -9,7 +9,7 @@ import (
 	"github.com/dirirahmed/Net-Pulse/internal/models"
 )
 
-// PC Sentinel targets Windows. On other platforms (used for development and
+// The agent targets Windows. On other platforms (used for development and
 // CI) the only GPU source is nvidia-smi when it happens to be installed.
 type otherGPU struct {
 	smi *nvidiaSMI

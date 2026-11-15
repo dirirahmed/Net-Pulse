@@ -95,7 +95,7 @@ export function Settings({
       onSaved(r.config);
       setStatus(
         r.restartRequired?.length
-          ? { tone: "warning", msg: `Saved. Restart PC Sentinel to apply: ${r.restartRequired.join(", ")}.` }
+          ? { tone: "warning", msg: `Saved. Restart Net-Pulse to apply: ${r.restartRequired.join(", ")}.` }
           : { tone: "good", msg: "Saved. Changes are active now." },
       );
     } catch (e) {
@@ -306,7 +306,7 @@ export function Settings({
         </Panel>
         <Panel title="Privacy">
           <p className="small">
-            All telemetry is collected and stored on this PC. PC Sentinel makes no network requests of its own, has no cloud component and
+            All telemetry is collected and stored on this PC. Net-Pulse makes no network requests of its own, has no cloud component and
             uses no AI or machine-learning models. It reads interface byte counters only and never inspects network traffic. Process names
             and paths are shown live but are not written to the history database.
           </p>

@@ -65,8 +65,22 @@ func TestDisabledWithoutKey(t *testing.T) {
 	}
 }
 
+func TestLegacyModelVariable(t *testing.T) {
+	t.Setenv(EnvAPIKey, testKey)
+	t.Setenv(EnvModel, "")
+	t.Setenv(EnvLegacyModel, "claude-haiku-4-5")
+	if m := New(ConfigFromEnv()).Model(); m != "claude-haiku-4-5" {
+		t.Errorf("legacy variable ignored: model = %q", m)
+	}
+	t.Setenv(EnvModel, "claude-sonnet-5")
+	if m := New(ConfigFromEnv()).Model(); m != "claude-sonnet-5" {
+		t.Errorf("new variable must win over the legacy one: model = %q", m)
+	}
+}
+
 func TestConfigFromEnv(t *testing.T) {
 	t.Setenv(EnvAPIKey, testKey)
+	t.Setenv(EnvLegacyModel, "")
 	t.Setenv(EnvModel, "claude-haiku-4-5")
 	c := New(ConfigFromEnv())
 	if !c.Enabled() || c.Model() != "claude-haiku-4-5" {
@@ -113,7 +127,7 @@ func TestAskSendsGroundedRequestAndParsesAnswer(t *testing.T) {
 		t.Fatalf("messages = %+v", got.Messages)
 	}
 	last := got.Messages[2].Content
-	for _, want := range []string{"<pc_sentinel_data>", "Possible CPU bottleneck", "GPU usage averaged 48%", "Question: Is my PC CPU or GPU limited?"} {
+	for _, want := range []string{"<netpulse_data>", "Possible CPU bottleneck", "GPU usage averaged 48%", "Question: Is my PC CPU or GPU limited?"} {
 		if !strings.Contains(last, want) {
 			t.Errorf("final message missing %q", want)
 		}

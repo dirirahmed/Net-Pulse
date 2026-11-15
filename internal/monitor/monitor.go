@@ -338,7 +338,7 @@ func (m *Monitor) bucketFor(period time.Duration) time.Duration {
 	return max(hist, (period / maxSeriesPoints).Round(time.Second))
 }
 
-// selfUsage measures PC Sentinel's own CPU and memory footprint. CPU time
+// selfUsage measures the agent's own CPU and memory footprint. CPU time
 // has coarse (10-16 ms) OS granularity, so the since-start average is the
 // more meaningful figure; the per-interval value is often 0.
 type selfUsage struct {

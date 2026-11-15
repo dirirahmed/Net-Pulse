@@ -33,7 +33,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_
     res = await fetch(path, { ...init, signal: controller.signal });
   } catch (err) {
     const aborted = err instanceof DOMException && err.name === "AbortError";
-    throw new ApiError(aborted ? "Request timed out" : "Cannot reach the PC Sentinel agent", 0);
+    throw new ApiError(aborted ? "Request timed out" : "Cannot reach the Net-Pulse agent", 0);
   } finally {
     clearTimeout(timer);
   }

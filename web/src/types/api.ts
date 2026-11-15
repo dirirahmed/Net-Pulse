@@ -253,7 +253,7 @@ export interface SettingsResponse {
   restartRequired?: string[];
 }
 
-// ---- V2: performance analysis and Ask Sentinel ----
+// ---- Performance analysis and Ask Pulse ----
 
 export type AnalysisStatus = "ok" | "collecting" | Severity;
 

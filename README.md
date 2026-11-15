@@ -1,60 +1,110 @@
 # Net-Pulse
 
-> **Merge in progress.** PC Sentinel (local system-health agent and dashboard) has been merged into this
-> repository with its full commit history. Its code now lives under the `github.com/dirirahmed/Net-Pulse`
-> module next to the Net-Pulse network diagnostics engine. The two are being unified into a single
-> product over the next commits; until then both original READMEs are kept below unchanged.
+Net-Pulse is a local system-health, performance and network-diagnostics tool in one Go binary.
 
-- [Net-Pulse: network diagnostics engine](#net-pulse-v2-network-diagnostics-engine)
-- [PC Sentinel: system-health agent and dashboard](#pc-sentinel)
+- **`netpulse serve`** runs a small agent that collects CPU, memory, GPU, disk, network and process telemetry, scores system health with transparent rules, raises threshold-based alerts, explains performance problems, and serves a React dashboard at `http://127.0.0.1:8787`.
+- **`netpulse scan <target>`** runs the network diagnostics engine once from the command line: DNS, port scan, TCP, a verifying TLS handshake and HTTP, with structured JSON output.
 
-## Net-Pulse v2: Network Diagnostics Engine
+Both share one codebase: the same engine that powers the CLI is a library the agent can call, and the agent's analysis and optional AI assistant ("Ask Pulse") sit on top of everything it measures.
 
-### The point of this project
+> **Telemetry stays on your machine by default.** The agent listens only on `127.0.0.1` and, unless Ask Pulse is enabled and used, makes no outbound requests of its own. See [Privacy](#privacy).
 
-Net-Pulse is a network diagnostic tool built in Go. A standard `ping` only tells
-you whether a machine is on. Net-Pulse tells you whether the *services* on that
-machine are actually functioning: whether the name resolves, whether the port
-accepts a connection, whether the TLS certificate is valid, and whether the web
-server answers.
+![Dashboard](docs/screenshots/dashboard-dark-1440.png)
 
-V1 was a concurrent port scanner. V2 is a reusable diagnostics engine with a CLI
-on top of it. The networking code produces structured results and never prints
-anything, so the same engine can back an API and a results database later
-without being rewritten.
+<details>
+<summary>More screenshots</summary>
 
-### What it does
+| Performance history | Processes |
+| --- | --- |
+| ![Performance](docs/screenshots/performance-dark-1440.png) | ![Processes](docs/screenshots/processes-light-1100.png) |
+| **Alerts** | **Settings** |
+| ![Alerts](docs/screenshots/alerts-dark-1440.png) | ![Settings](docs/screenshots/settings-dark-1440.png) |
+| **Analysis** | |
+| ![Analysis](docs/screenshots/analysis-dark-1440.png) | |
 
-**DNS diagnostics** - resolved addresses, CNAME, lookup duration, and a
-classified error when resolution fails or times out.
+Mobile-width layout: [dashboard-light-390.png](docs/screenshots/dashboard-light-390.png)
 
-**Port scanning** - configurable port lists and ranges, scanned by a fixed
-worker pool. Each port reports open / closed / timeout / error plus how long the
-connection took. Known ports are mapped to the service they usually carry.
+</details>
 
-**TCP diagnostics** - a real connection to the target port, with duration,
-local/remote addresses and a classified failure reason.
+_The screenshots were captured before PC Sentinel merged into Net-Pulse, so they still show the old name in the sidebar. They are real output from a Linux development VM (2 vCPU, no GPU, no temperature sensors) with an artificial CPU load running to trigger the alert, which is why GPU and temperature read "Unavailable"._
 
-**TLS diagnostics** - a real, *verifying* handshake. Records the negotiated
-version and cipher, ALPN, the certificate chain, expiry, and whether validation
-succeeded. Verification is never disabled to make a probe look successful: when
-a chain fails to validate, the result stays a failure and the certificate is
-re-read separately only so you can see what was wrong with it.
+---
 
-**HTTP/HTTPS diagnostics** - status code, total duration, time to first byte,
-the redirect chain, interesting response headers, and classified transport
-errors.
+## Contents
 
-### Usage
+- [Quick start](#quick-start)
+- [Features](#features)
+- [Network diagnostics: `netpulse scan`](#network-diagnostics-netpulse-scan)
+- [Architecture](#architecture)
+- [Technology stack](#technology-stack)
+- [How telemetry is collected](#how-telemetry-is-collected)
+- [How health scoring works](#how-health-scoring-works)
+- [Performance analysis](#performance-analysis)
+- [Ask Pulse: AI assistant](#ask-pulse-ai-assistant)
+- [Alerts](#alerts)
+- [History and retention](#history-and-retention)
+- [API overview](#api-overview)
+- [Configuration](#configuration)
+- [Setup](#setup)
+- [Development](#development)
+- [Testing](#testing)
+- [Performance of the agent itself](#performance-of-the-agent-itself)
+- [Reliability behaviour](#reliability-behaviour)
+- [Limitations](#limitations)
+- [Privacy](#privacy)
+- [Roadmap](#roadmap)
+- [Project history](#project-history)
+
+## Quick start
+
+```powershell
+cd web; npm install; npm run build; cd ..      # build the dashboard (embedded into the binary)
+go build -o bin\netpulse.exe .\cmd\netpulse
+
+.\bin\netpulse.exe serve                      # agent + dashboard on http://127.0.0.1:8787
+.\bin\netpulse.exe scan example.com           # one-off network diagnostics
+.\bin\netpulse.exe help
+```
+
+`netpulse <target>` with no subcommand is shorthand for `scan`, so the pre-merge `net-pulse example.com` form still works.
+
+## Features
+
+**System monitoring (`netpulse serve`)**
+
+- **Dashboard.** Overall health score with per-category breakdown, active alerts, live tiles for CPU, memory, GPU, network and disk with 5-minute sparklines, per-core CPU load, drive capacity with low-space warnings, GPU adapter details, uptime, and the agent's own footprint.
+- **CPU.** Total and per-core utilization, model, physical cores and threads, base clock, current clock (Windows: Task Manager-style effective speed), temperature where a sensor is readable, plus 5-minute peak and average.
+- **Memory.** Total, used, available and percent used, with history and peak.
+- **GPU.** A vendor-neutral path on Windows: adapter name, vendor, utilization, per-engine utilization (3D, Copy, Video Decode, …), and dedicated memory used and total. Temperature comes from `nvidia-smi` when it is installed; otherwise it shows as unavailable.
+- **Disks.** Every local drive's capacity, used, free and percent, read/write throughput, and warning/critical badges when free space runs low. SSD health/SMART is **not** reported.
+- **Network throughput.** Download and upload rates, cumulative totals, and history. Only interface byte counters are read; packets are never inspected.
+- **Processes.** Name, PID, CPU %, memory, executable path (when accessible) and status, with sorting and search. Read-only: terminating processes is deliberately **not** supported.
+- **Performance page.** Historical charts for CPU, memory, GPU, temperatures, network, disk I/O and drive fill level over 5m / 15m / 30m / 1h / 6h / 24h / 7d, with average and peak for the selected range and a hover crosshair and tooltip.
+- **Alerts.** Deterministic rules with sustain periods, hysteresis and cooldowns, shown with severity, timestamp, component and reason, plus stored alert history.
+- **Analysis.** Rule-based findings with evidence, explanations and recommendations, plus the optional Ask Pulse assistant. See [Performance analysis](#performance-analysis).
+- **Settings.** Refresh interval, history resolution and retention, alert cooldown, all thresholds, and theme (dark / light / system), editable in the UI and saved to a JSON config file.
+- **Single binary.** The built frontend is embedded in the Go executable with `go:embed`.
+
+**Network diagnostics (`netpulse scan`)**
+
+- **DNS** - resolved addresses, CNAME, lookup duration, and a classified error when resolution fails or times out.
+- **Port scanning** - configurable port lists and ranges, scanned by a fixed worker pool; each port reports open / closed / timeout / error plus connect time, mapped to its usual service.
+- **TCP** - a real connection to the target port with duration, local/remote addresses and a classified failure reason.
+- **TLS** - a real, *verifying* handshake: negotiated version and cipher, ALPN, the certificate chain, expiry, and whether validation succeeded. Verification is never disabled to make a probe look successful.
+- **HTTP/HTTPS** - status code, total duration, time to first byte, the redirect chain, interesting response headers, and classified transport errors.
+
+## Network diagnostics: `netpulse scan`
+
+A standard `ping` only tells you whether a machine is on. `netpulse scan` tells you whether the *services* on it actually work: whether the name resolves, whether the port accepts a connection, whether the TLS certificate is valid, and whether the web server answers.
+
+The networking code produces structured results and never prints anything (`internal/engine` → `internal/probe` → `internal/result`); the CLI in `internal/cli` only renders them. That is what lets the same engine back the agent's API.
 
 ```bash
-go run ./cmd/netpulse example.com
+go run ./cmd/netpulse scan example.com
 go run ./cmd/netpulse scan https://example.com/health
 go run ./cmd/netpulse scan -checks dns,tls -ports 443,8443 example.com
 go run ./cmd/netpulse scan -json 1.1.1.1 > scan.json
 ```
-
-Flags:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -72,27 +122,11 @@ Flags:
 | `-json` | `false` | emit the structured report instead of text |
 | `-show-closed` | `false` | list closed and filtered ports too |
 
-Running with no target keeps the V1 behaviour and scans `8.8.8.8`.
-
-### Layout
-
-```
-cmd/netpulse/                single binary: `netpulse scan` (CLI) and `netpulse serve` (agent)
-internal/result/            structured result types (pure data, JSON ready)
-internal/probe/             dns, tcp, scan, tls, http probes + error classification
-internal/engine/            target parsing and orchestration into one Report
-internal/cli/               flags and text rendering
-internal/safety/            target checks for callers that don't own the target
-```
-
-The dependency direction is one-way: `cli -> engine -> probe -> result`. Nothing
-below `cli` knows how results are displayed.
+Targets can be `8.8.8.8`, `example.com`, `example.com:8443`, `[::1]:443` or a full `https://` URL. Running `scan` with no target keeps the V1 behaviour and scans `8.8.8.8`.
 
 ### Scanning untrusted targets
 
-The CLI assumes you own what you point it at, so it does no checking. Anything
-that takes a target from someone else cannot assume that, and `internal/safety`
-exists for those callers:
+The CLI assumes you own what you point it at, so it does no checking. Anything that takes a target from someone else cannot assume that, and `internal/safety` exists for those callers:
 
 ```go
 guard := &safety.Guard{}
@@ -105,130 +139,31 @@ opts.Dialer = guard.Dialer()   // enforced again at connect time
 report := engine.Run(ctx, target, opts)
 ```
 
-Two checks, because neither is enough alone. `CheckTarget` resolves the name
-and refuses it if *any* answer is reserved. `Dialer` re-checks inside
-`net.Dialer.Control`, which runs after resolution with the address the kernel
-is about to connect to — that is what catches a name resolving differently the
-second time, and redirects pointing at internal hosts.
+Two checks, because neither is enough alone. `CheckTarget` resolves the name and refuses it if *any* answer is reserved. `Dialer` re-checks inside `net.Dialer.Control`, which runs after resolution with the address the kernel is about to connect to; that is what catches a name resolving differently the second time, and redirects pointing at internal hosts. Every probe dials through whatever dialer it is handed, so setting `Options.Dialer` once covers ports, TCP, TLS and HTTP together. Setting `AllowPrivate` turns both checks off.
 
-Every probe dials through whatever dialer it is handed, so setting
-`Options.Dialer` once covers ports, TCP, TLS and HTTP together. Setting
-`AllowPrivate` turns both checks off for local development.
-
-### Tests
-
-```bash
-go test ./...
-go test -race ./...
-go test -bench=. ./internal/probe
-```
-
-Tests use loopback listeners, `httptest` servers and a fake DNS resolver, so
-they do not need internet access.
-
----
-
-## PC Sentinel
-
-PC Sentinel is a local system-health and performance monitor for Windows. A small Go agent collects CPU, memory, GPU, disk, network and process telemetry, scores system health with transparent rules, raises threshold-based alerts, and serves a React dashboard at `http://127.0.0.1:8787`. It gives you one clear view of your PC without juggling Task Manager, Resource Monitor and command-line tools.
-
-> **V2 adds performance analysis and an optional AI assistant.** The analysis is local and rule-based, like everything in V1. The assistant ("Ask Sentinel") uses the Anthropic API, is **off unless you set an API key**, and only sends data when you ask it a question. PC Sentinel works fully without it.
->
-> **Telemetry stays on your PC by default.** The agent listens only on `127.0.0.1` and, unless Ask Sentinel is enabled and used, makes no outbound network requests. See [Privacy](#privacy) for exactly what a question sends.
-
-![Dashboard](docs/screenshots/dashboard-dark-1440.png)
-
-<details>
-<summary>More screenshots</summary>
-
-| Performance history | Processes |
-| --- | --- |
-| ![Performance](docs/screenshots/performance-dark-1440.png) | ![Processes](docs/screenshots/processes-light-1100.png) |
-| **Alerts** | **Settings** |
-| ![Alerts](docs/screenshots/alerts-dark-1440.png) | ![Settings](docs/screenshots/settings-dark-1440.png) |
-
-Mobile-width layout: [dashboard-light-390.png](docs/screenshots/dashboard-light-390.png)
-
-</details>
-
-_The screenshots are real output, captured on a Linux development VM (2 vCPU, no GPU, no temperature sensors) with an artificial CPU load running to trigger the alert. That is why GPU and temperature read "Unavailable". On a Windows PC those panels fill in where the hardware exposes the data._
-
----
-
-### Contents
-
-- [What's new in V2](#whats-new-in-v2)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Technology stack](#technology-stack)
-- [How telemetry is collected](#how-telemetry-is-collected)
-- [How health scoring works](#how-health-scoring-works)
-- [Performance analysis (V2)](#performance-analysis-v2)
-- [Ask Sentinel: AI assistant (V2)](#ask-sentinel-ai-assistant-v2)
-- [Alerts](#alerts)
-- [History and retention](#history-and-retention)
-- [API overview](#api-overview)
-- [Configuration](#configuration)
-- [Setup](#setup)
-- [Development](#development)
-- [Testing](#testing)
-- [Performance of the agent itself](#performance-of-the-agent-itself)
-- [Reliability behaviour](#reliability-behaviour)
-- [Limitations](#limitations)
-- [Privacy](#privacy)
-- [Roadmap](#roadmap)
-
-### What's new in V2
-
-V1 monitors the PC. V2 also **explains** what the data means:
-
-- **Performance analysis.** A small deterministic layer reads the last 5 minutes of V1 telemetry plus the current process list and reports concrete findings: sustained high CPU, high memory, a program using unusually much CPU or memory, high disk activity, high GPU usage, low disk space, and a possible CPU bottleneck (CPU near its limit while the GPU has headroom). Each finding has a severity, the measured evidence, a short explanation and a suggested action.
-- **Analysis page.** A new page in the dashboard with a performance summary, the detected issues, practical recommendations, and the Ask Sentinel chat.
-- **Ask Sentinel (optional).** Ask questions such as *"Why is my PC slow?"*, *"Is my PC CPU or GPU limited?"* or *"What should I fix first?"*. The assistant receives PC Sentinel's structured findings and telemetry and explains them in plain language. It is told to use only that data and never to claim something was detected when it wasn't.
-- **Two new endpoints:** `GET /api/analysis` and `POST /api/ai/ask`.
-
-![Analysis page](docs/screenshots/analysis-dark-1440.png)
-
-_The Analysis page under a two-process CPU load on the Linux dev VM. Both findings quote the measured values, and the GPU checks are listed as skipped because the VM has no GPU. Ask Sentinel shows its "off" state because no API key was set._
-
-Still deliberately out of scope: automatic optimisation, process termination, registry, startup-app or power-plan changes, and anything that modifies the system. PC Sentinel remains read-only.
-
-### Features
-
-- **Dashboard.** Overall health score with per-category breakdown, active alerts, live tiles for CPU, memory, GPU, network and disk with 5-minute sparklines, per-core CPU load, drive capacity with low-space warnings, GPU adapter details, uptime, and the agent's own footprint.
-- **CPU.** Total and per-core utilization, model, physical cores and threads, base clock, current clock (Windows: Task Manager-style effective speed), temperature where a sensor is readable, plus 5-minute peak and average.
-- **Memory.** Total, used, available and percent used, with history and peak.
-- **GPU.** A vendor-neutral path on Windows: adapter name, vendor, utilization, per-engine utilization (3D, Copy, Video Decode, …), and dedicated memory used and total. Temperature comes from `nvidia-smi` when it is installed; otherwise it shows as unavailable.
-- **Disks.** Every local drive's capacity, used, free and percent, read/write throughput, and warning/critical badges when free space runs low. SSD health/SMART is **not** reported.
-- **Network.** Download and upload rates, cumulative totals, and history. Only interface byte counters are read; packets are never inspected.
-- **Processes.** Name, PID, CPU %, memory, executable path (when accessible) and status, with sorting and search. Read-only: terminating processes is deliberately **not** supported.
-- **Performance page.** Historical charts for CPU, memory, GPU, temperatures, network, disk I/O and drive fill level over 5m / 15m / 30m / 1h / 6h / 24h / 7d, with average and peak for the selected range and a hover crosshair and tooltip.
-- **Alerts.** Deterministic rules with sustain periods, hysteresis and cooldowns, shown with severity, timestamp, component and reason, plus stored alert history.
-- **Analysis (V2).** Rule-based findings with evidence, explanations and recommendations, plus the optional Ask Sentinel assistant. See [Performance analysis](#performance-analysis-v2).
-- **Settings.** Refresh interval, history resolution and retention, alert cooldown, all thresholds, and theme (dark / light / system), editable in the UI and saved to a JSON config file.
-- **Single binary.** The built frontend is embedded in the Go executable with `go:embed`.
-
-### Architecture
+## Architecture
 
 ```
-            ┌───────────────────────── pcsentinel.exe (Go) ──────────────────────────┐
-            │                                                                         │
- Windows ──▶│  collector/  cpu · memory · gpu (PDH + DXGI) · disk · network · process │
- APIs       │      │  one Snapshot per interval (default 2 s)                         │
-            │      ▼                                                                  │
-            │  monitor/    loop · 30-min in-memory ring · 10 s averaging buckets      │
-            │      │                 │                        │                       │
-            │      ▼                 ▼                        ▼                       │
-            │  analyzer/  health · alerts · analysis     storage/  SQLite (history,   │
-            │                                                      disk usage, alerts)│
-            │      │                                                                  │
-            │      ▼                                                                  │
-            │  api/        JSON over HTTP on 127.0.0.1:8787  +  embedded web/dist     │
-            │      │                                                                  │
-            │      └─▶ ai/  (optional) Anthropic Messages API, only on "Ask Sentinel"  │
-            └──────┼──────────────────────────────────────────────────────────────────┘
-                   ▼
-            React + TypeScript dashboard (polls the API; pauses while the tab is hidden)
+ ┌────────────────────────────── netpulse (one Go binary) ───────────────────────────────┐
+ │                                                                                       │
+ │   netpulse serve                                    netpulse scan <target>            │
+ │   ──────────────                                    ──────────────────────            │
+ │   collector/  cpu · mem · gpu · disk · net · procs  cli/     flags, text / JSON       │
+ │       │  one Snapshot every 2 s                        │                              │
+ │       ▼                                                ▼                              │
+ │   monitor/    loop · 30-min ring · 10 s buckets     engine/  target parsing, one      │
+ │       │                    │                           │     Report per scan          │
+ │       ▼                    ▼                           ▼                              │
+ │   analyzer/   health ·   storage/  SQLite           probe/   dns · ports · tcp ·      │
+ │   alerts · analysis      history + alerts              │     tls · http               │
+ │       │                                                ▼                              │
+ │       ▼                                             result/  pure data, JSON ready    │
+ │   api/  JSON on 127.0.0.1:8787 + embedded web/dist                                    │
+ │       │                                             safety/  guard for targets the    │
+ │       └─▶ ai/  optional Anthropic API (Ask Pulse)            caller doesn't own       │
+ └───────┼───────────────────────────────────────────────────────────────────────────────┘
+         ▼
+   React + TypeScript dashboard (polls the API; pauses while the tab is hidden)
 ```
 
 ```
@@ -236,13 +171,18 @@ cmd/netpulse/          single binary: `scan` and `serve` subcommands
 internal/
   agent/               `serve`: flags, wiring, graceful shutdown
   collector/           telemetry sources; *_windows.go holds PDH, DXGI and drive-type code
-  analyzer/            health scoring, alert state machine, series summaries, performance analysis (V2)
-  ai/                  optional Anthropic API client for Ask Sentinel (V2), isolated from monitoring
+  analyzer/            health scoring, alert state machine, series summaries, performance analysis
+  ai/                  optional Anthropic API client for Ask Pulse, isolated from monitoring
   monitor/             collection loop, live ring buffer, downsampling, self-measurement
   storage/             SQLite schema, queries, retention pruning
   api/                 HTTP handlers and response types (dto.go)
   models/              telemetry types shared across layers
   config/              config file load/validate/save
+  cli/                 `scan`: flags and text rendering
+  engine/              target parsing and orchestration into one Report
+  probe/               dns, tcp, port scan, tls, http probes + error classification
+  result/              structured diagnostic result types (pure data, JSON ready)
+  safety/              target checks for callers that don't own the target
 web/
   src/components/      charts (hand-written SVG), tiles, panels, status pills
   src/pages/           Dashboard, Performance, Analysis, Processes, Alerts, Settings
@@ -257,28 +197,30 @@ Design notes:
 
 - **Collectors are isolated.** Each runs inside a guard that turns errors *and panics* into a per-component status, so a failing driver or missing sensor produces an "unavailable" field instead of a crash.
 - **Unavailable is not zero.** Metrics that can't be read are `null` in JSON and show as "Unavailable" in the UI, often with a tooltip explaining why.
+- **The diagnostics engine never prints.** It returns `result.Report` values; `cli` renders them and the agent serves them as JSON. Dependency direction is one-way: `cli -> engine -> probe -> result`.
 - **The API layer owns its response types** (`internal/api/dto.go`). Handlers depend on a small `Source` interface, which keeps them testable without real hardware.
-- **No global mutable state** in PC Sentinel's code: rate baselines live on collector structs, shared state lives on the monitor behind a mutex, and configuration sits in a concurrency-safe store.
+- **No global mutable state:** rate baselines live on collector structs, shared state lives on the monitor behind a mutex, and configuration sits in a concurrency-safe store.
 
-### Technology stack
+## Technology stack
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Agent | Go 1.24, standard library `net/http`, `log/slog`, `embed` | Small static binary, low overhead |
-| AI (optional, V2) | Anthropic Messages API over plain `net/http` | No SDK dependency; isolated in `internal/ai` |
+| Agent and CLI | Go 1.24, standard library `net/http`, `log/slog`, `embed` | Small static binary, low overhead |
+| Network diagnostics | Standard library only (`net`, `crypto/tls`, `net/http/httptrace`) | Real handshakes and timings with no third-party networking code |
+| AI (optional) | Anthropic Messages API over plain `net/http` | No SDK dependency; isolated in `internal/ai` |
 | System metrics | [gopsutil v4](https://github.com/shirou/gopsutil) | Mature, cross-platform CPU/memory/disk/network/process access |
 | Windows specifics | `golang.org/x/sys/windows` calling PDH (`pdh.dll`) and DXGI (`dxgi.dll`) directly | Vendor-neutral GPU data without cgo or vendor SDKs |
 | Storage | SQLite via [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | Pure Go (WebAssembly build of SQLite), so no C compiler or DLL is needed on Windows |
 | Frontend | React 19, TypeScript, Vite | No UI framework and no chart library: charts are ~200 lines of SVG |
 | Tests | Go `testing` + `httptest`; Vitest for frontend logic | |
 
-The frontend has two runtime dependencies (`react`, `react-dom`). The Go agent has three direct dependencies.
+The frontend has two runtime dependencies (`react`, `react-dom`). The Go module has three direct dependencies, all used by the agent; the diagnostics engine uses only the standard library.
 
-### How telemetry is collected
+## How telemetry is collected
 
 | Metric | Windows source | Notes / fallback |
 | --- | --- | --- |
-| CPU utilization (total, per core) | System CPU time counters (gopsutil → `GetSystemTimes` / `NtQuerySystemInformation`), differenced between samples | Computed by PC Sentinel from raw counters, not a library helper with hidden global state |
+| CPU utilization (total, per core) | System CPU time counters (gopsutil → `GetSystemTimes` / `NtQuerySystemInformation`), differenced between samples | Computed by Net-Pulse from raw counters, not a library helper with hidden global state |
 | CPU model, cores, threads, base clock | gopsutil `cpu.Info` / `cpu.Counts` | |
 | CPU current clock | PDH `\Processor Information(_Total)\% Processor Performance` × base clock | Same method Task Manager uses. On Linux: `scaling_cur_freq` from sysfs |
 | CPU temperature | WMI `MSAcpi_ThermalZoneTemperature` (via gopsutil) | Often needs admin rights and is often a motherboard zone rather than the CPU die, so the UI labels the source. Unavailable is common on Windows. Polled every 10 s, with a 5-minute back-off after failures |
@@ -294,7 +236,7 @@ The frontend has two runtime dependencies (`react`, `react-dom`). The Go agent h
 
 Non-Windows platforms (used for development and CI) share everything except the Windows GPU path; there, GPU data comes only from `nvidia-smi` if it is present.
 
-### How health scoring works
+## How health scoring works
 
 Each category gets a score from 0 to 100 from a simple piecewise-linear rule: full marks up to a "good" level, then a linear fall to a floor at a "bad" level. The rules live in `internal/analyzer/health.go`, are covered by tests, and are also explained in the Settings page.
 
@@ -313,9 +255,9 @@ Each category gets a score from 0 to 100 from a simple piecewise-linear rule: fu
 
 These are rules of thumb for a typical desktop. The score is a quick summary of *load and headroom right now*, **not** a precise or scientific measure of hardware health, and it says nothing about component wear or failure risk.
 
-### Performance analysis (V2)
+## Performance analysis
 
-`internal/analyzer/performance.go` runs on request (`GET /api/analysis`, and before every Ask Sentinel question). It uses data PC Sentinel already has: the in-memory history for the last 5 minutes, the latest snapshot, and the process list. There is no machine learning or statistical modelling, only the thresholds below.
+`internal/analyzer/performance.go` runs on request (`GET /api/analysis`, and before every Ask Pulse question). It uses data Net-Pulse already has: the in-memory history for the last 5 minutes, the latest snapshot, and the process list. There is no machine learning or statistical modelling, only the thresholds below.
 
 | Finding | Rule (defaults) | Severity |
 | --- | --- | --- |
@@ -335,9 +277,9 @@ These are rules of thumb for a typical desktop. The score is a quick summary of 
 - The bottleneck rule needs some GPU activity: an idle GPU has no work to be starved of, so a CPU-only job such as compiling shows as high CPU, not as a bottleneck.
 - Process CPU is a point-in-time reading (the same one the Processes page shows), so a program that is just starting up can briefly appear.
 
-### Ask Sentinel: AI assistant (V2)
+## Ask Pulse: AI assistant
 
-Ask Sentinel explains the analysis in plain language and answers follow-up questions. It is optional and isolated: the code lives in `internal/ai`, nothing in the collectors, monitor or analyzer depends on it, and it runs only when you ask a question.
+Ask Pulse explains the analysis in plain language and answers follow-up questions. It is optional and isolated: the code lives in `internal/ai`, nothing in the collectors, monitor or analyzer depends on it, and it runs only when you ask a question.
 
 **How it works.** When you ask a question, the agent runs a fresh analysis and sends the Anthropic API one request containing a system prompt, your question, up to 8 earlier turns of the conversation, and a JSON block with:
 
@@ -348,7 +290,7 @@ Ask Sentinel explains the analysis in plain language and answers follow-up quest
 
 The system prompt tells the model to base every statement on that data, quote the actual numbers, say when something wasn't measured, only report issues that appear in the findings or alerts, and never recommend registry edits, "optimizer" tools or disabling security software. Hostname, file paths and user names are never sent.
 
-**Configure the API key.** The key is read from an environment variable on the machine running the agent. It is never written to disk by PC Sentinel, never logged and never sent to the browser.
+**Configure the API key.** The key is read from an environment variable on the machine running the agent. It is never written to disk by Net-Pulse, never logged and never sent to the browser.
 
 ```powershell
 # PowerShell, current session only
@@ -363,11 +305,11 @@ Optional variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | *(unset: assistant off)* | Enables Ask Sentinel |
-| `PCSENTINEL_AI_MODEL` | `claude-sonnet-5` | Model to use, e.g. `claude-haiku-4-5` for lower cost |
+| `ANTHROPIC_API_KEY` | *(unset: assistant off)* | Enables Ask Pulse |
+| `NETPULSE_AI_MODEL` | `claude-sonnet-5` | Model to use, e.g. `claude-haiku-4-5` for lower cost |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Send requests through an API gateway or proxy instead |
 
-At startup the log says either `Ask Sentinel enabled model=...` or `Ask Sentinel disabled`.
+At startup the log says either `Ask Pulse enabled model=...` or `Ask Pulse disabled`.
 
 **Use it.** Open **Analysis** in the dashboard, then click a suggested question or type your own (Enter sends, Shift+Enter adds a new line). Without a key, the chat area explains how to enable it and the rest of the page works as normal.
 
@@ -375,7 +317,7 @@ At startup the log says either `Ask Sentinel enabled model=...` or `Ask Sentinel
 
 Each question is a paid API call on your Anthropic account. Answers typically take a few seconds.
 
-### Alerts
+## Alerts
 
 | Rule | Condition (defaults) | Severity |
 | --- | --- | --- |
@@ -398,7 +340,7 @@ The engine (`internal/analyzer/alerts.go`) is a small deterministic state machin
 
 Every alert records rule, component, target, severity, title, human-readable reason, value, threshold, start, last update and resolution time.
 
-### History and retention
+## History and retention
 
 - Samples are collected every `sampleIntervalSeconds` (default 2 s) and kept at full resolution in memory for 30 minutes, which serves the 5m / 15m / 30m ranges and the rolling windows used for scoring.
 - Every `historyIntervalSeconds` (default 10 s) the buffered samples are **averaged into one SQLite row**. Peak CPU and GPU within the bucket are kept in separate columns, so short spikes still show as peaks. That is about 8,640 rows per day.
@@ -406,9 +348,9 @@ Every alert records rule, component, target, severity, title, human-readable rea
 - Ranges of 1h and longer are read from SQLite and bucketed server-side to about 300 points.
 - **Retention:** every hour, samples, drive rows and *resolved* alerts older than `retentionDays` (default 7, max 90) are deleted.
 - **What is stored:** numeric metrics, drive mount points, and alert records. Process names, paths and command lines are **never** written to disk. Hostname is only shown live.
-- Location: `%APPDATA%\PCSentinel\history.db` (override with `-data-dir`).
+- Location: `%APPDATA%\NetPulse\history.db` (override with `-data-dir`).
 
-### API overview
+## API overview
 
 All endpoints are `GET` unless noted, return JSON, and are served only on the loopback interface. Unavailable metrics are `null`. Errors look like `{"error": "..."}`.
 
@@ -426,8 +368,8 @@ All endpoints are `GET` unless noted, return JSON, and are served only on the lo
 | `/api/alerts?limit=200` | Active alerts (from memory) + stored history |
 | `/api/settings` | Current configuration |
 | `PUT /api/settings` | Update configuration (partial JSON is merged; validated; persisted) |
-| `/api/analysis` | V2: performance analysis (status, summary, findings, recommendations, notes, 5-minute metrics) and whether Ask Sentinel is enabled |
-| `POST /api/ai/ask` | V2: `{"question": "...", "history": [{"role": "user"\|"assistant", "content": "..."}]}` → `{"answer", "model", "generatedAt", "analysis"}`. Returns `503` when no API key is configured, `502`/`504` for upstream errors or timeouts |
+| `/api/analysis` | Performance analysis (status, summary, findings, recommendations, notes, 5-minute metrics) and whether Ask Pulse is enabled |
+| `POST /api/ai/ask` | `{"question": "...", "history": [{"role": "user"\|"assistant", "content": "..."}]}` → `{"answer", "model", "generatedAt", "analysis"}`. Returns `503` when no API key is configured, `502`/`504` for upstream errors or timeouts |
 
 Ranges: `5m`, `15m`, `30m`, `1h`, `6h`, `24h`, `7d`. Before the first sample completes, telemetry endpoints return `503`. If the history database is unavailable, long ranges return `503` while live endpoints keep working.
 
@@ -459,9 +401,9 @@ Security hardening, since any web page can try to reach `localhost`:
 - The Anthropic API key stays in the agent's environment. No endpoint returns it.
 - Responses carry a strict CSP and `nosniff`.
 
-### Configuration
+## Configuration
 
-Settings live in `%APPDATA%\PCSentinel\config.json`. The file is optional: missing fields keep their defaults, an invalid file is reported and defaults are used instead. See [`config.example.json`](config.example.json) (a test keeps it identical to the built-in defaults).
+Settings live in `%APPDATA%\NetPulse\config.json`. The file is optional: missing fields keep their defaults, an invalid file is reported and defaults are used instead. See [`config.example.json`](config.example.json) (a test keeps it identical to the built-in defaults).
 
 | Key | Default | Range | Notes |
 | --- | --- | --- | --- |
@@ -481,13 +423,13 @@ netpulse.exe serve [-data-dir DIR] [-config FILE] [-port N] [-open=false]
 
 `-open` (default on Windows) opens the dashboard in your browser at startup.
 
-### Setup
+## Setup
 
-**Requirements:** Windows 10 1709+ or Windows 11 (x64), [Go 1.24+](https://go.dev/dl/), [Node.js 20.19+ or 22.12+](https://nodejs.org/) (for building the frontend).
+**Requirements:** Windows 10 1709+ or Windows 11 (x64) for the full agent (the `scan` command and development builds also run on Linux and macOS), [Go 1.24+](https://go.dev/dl/), [Node.js 20.19+ or 22.12+](https://nodejs.org/) (for building the frontend).
 
 ```powershell
-git clone https://github.com/dirirahmed/PC-Sentinel.git
-cd PC-Sentinel
+git clone https://github.com/dirirahmed/Net-Pulse.git
+cd Net-Pulse
 
 # 1. Build the dashboard (output goes to web/dist, which the Go binary embeds)
 cd web
@@ -495,18 +437,20 @@ npm install
 npm run build
 cd ..
 
-# 2. Build the agent
+# 2. Build the binary
 go build -trimpath -ldflags "-s -w" -o bin\netpulse.exe .\cmd\netpulse
 
 # 3. Run it (opens http://127.0.0.1:8787)
 .\bin\netpulse.exe serve
 ```
 
+Upgrading from PC Sentinel: if `%APPDATA%\PCSentinel` exists and `%APPDATA%\NetPulse` doesn't, the agent keeps using the old folder, so settings and history carry over. `PCSENTINEL_AI_MODEL` is still read if `NETPULSE_AI_MODEL` isn't set.
+
 Stop with `Ctrl+C`. Buffered history is flushed and the database closed on shutdown. Running as Administrator is optional: it can make CPU temperature and a few protected process paths readable, but everything else works without it.
 
 You can also cross-compile the Windows binary from Linux or macOS: `make windows`. A `Makefile` wraps the common commands for systems with `make`.
 
-### Development
+## Development
 
 Run the agent and the Vite dev server side by side. Vite proxies `/api` to the agent and gives hot reload:
 
@@ -525,12 +469,13 @@ go vet ./...
 cd web && npm run typecheck && npm run format
 ```
 
-### Testing
+## Testing
 
 ```
 go test ./...
 go test -race ./...
 go vet ./...
+go test -bench=. ./internal/probe
 cd web && npm test
 ```
 
@@ -538,18 +483,20 @@ cd web && npm test
 
 What the tests cover:
 
+- **probe / engine / safety / cli:** DNS with a fake resolver, port parsing and the worker-pool scanner (loopback listeners), TCP error classification, verifying TLS against `httptest` certificates (expired, wrong host, self-signed), HTTP redirects and timings, target parsing, that `Options.Dialer` is used by every probe, the reserved-address and hostname blocklists including IPv4-mapped IPv6, and CLI flag handling. These need no internet access.
+- **cmd/netpulse and agent:** subcommand dispatch, help, unknown commands, and the legacy data-directory fallback.
 - **analyzer:** scoring-rule boundaries, the worst-category cap, exclusion of unavailable categories, grade cut-offs, the alert sustain timer (including reset on a dip), escalation keeping the same ID, the hysteresis band, cooldown, resolution of vanished targets, rules skipped when sensors are missing, disk-space classification, and series summaries using peak columns.
 - **collector:** counter-rate and counter-reset handling, CPU busy-time math, memory underflow protection, the Task-Manager-equivalent GPU engine aggregation (per-engine summing, clamping, multi-adapter), LUID formatting matching PDH names, `nvidia-smi` parsing including `[N/A]`, CPU sensor selection and ACPI labelling, sensor back-off, per-interface network deltas with adapter resets, partition filtering (bind mounts, read-only images), process CPU % with PID reuse, panic recovery, and **real collection on the host running the tests**.
 - **storage** (temp databases): round-trip and bucketed averaging, peak preservation, retention pruning (keeping open alerts), alert upsert, restart cleanup, a corrupt database file, and a newer-schema guard.
 - **monitor:** snapshot publication, alert persistence, downsampling arithmetic, continued monitoring during storage failures and recovery, live-only operation without a database, ring-buffer trimming, and window-coverage rules.
 - **api** (`httptest`): 503 before the first sample, JSON shape and `null` for unavailable data, range summaries, graceful degradation when history fails, bad ranges and limits, settings validation and partial updates, restart-required reporting, rejection of foreign `Host` headers, the SPA fallback and asset caching.
 - **config:** defaults, partial files, invalid values, threshold ordering, atomic persistence, and example-file parity.
-- **analysis (V2):** CPU and memory detection at each severity boundary, the 1-minute coverage rule, per-program CPU and memory detection with same-name grouping and the idle process excluded, the CPU/GPU bottleneck rule and its exclusions (busy, idle or unmeasured GPU), disk activity and free space, severity ordering and recommendation de-duplication.
-- **ai (V2)** (fake Anthropic server via `httptest`): disabled without a key, environment configuration, request headers and body (system prompt, conversation, findings in the data block), answer parsing, error mapping (401, 429, 529, non-JSON), truncated and empty answers, timeouts, and that the key never appears in errors.
-- **api, V2 endpoints:** `/api/analysis` built from series data, graceful degradation without history or processes, AI status reporting, `/api/ai/ask` disabled / success / validation / history sanitising / upstream errors, and that the hostname never reaches the model.
-- **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; V2 analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building.
+- **analysis:** CPU and memory detection at each severity boundary, the 1-minute coverage rule, per-program CPU and memory detection with same-name grouping and the idle process excluded, the CPU/GPU bottleneck rule and its exclusions (busy, idle or unmeasured GPU), disk activity and free space, severity ordering and recommendation de-duplication.
+- **ai** (fake Anthropic server via `httptest`): disabled without a key, environment configuration, request headers and body (system prompt, conversation, findings in the data block), answer parsing, error mapping (401, 429, 529, non-JSON), truncated and empty answers, timeouts, and that the key never appears in errors.
+- **api, analysis endpoints:** `/api/analysis` built from series data, graceful degradation without history or processes, AI status reporting, `/api/ai/ask` disabled / success / validation / history sanitising / upstream errors, and that the hostname never reaches the model.
+- **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building.
 
-### Performance of the agent itself
+## Performance of the agent itself
 
 The agent reports its own footprint (average CPU since start, resident memory, collection time) in the sidebar and in the System panel, so you can check it on your own machine.
 
@@ -570,7 +517,7 @@ Design choices that keep overhead low:
 - History is downsampled before it is written.
 - The UI stops polling when its tab is hidden.
 
-### Reliability behaviour
+## Reliability behaviour
 
 | Situation | Behaviour |
 | --- | --- |
@@ -586,32 +533,32 @@ Design choices that keep overhead low:
 | Agent unreachable from UI | Banner, "Disconnected" indicator, last values kept, automatic retry |
 | Second instance started | Fails fast on the port bind *before* touching the database |
 
-### Limitations
+## Limitations
 
-- **Windows validation.** The Windows-specific code (PDH queries, DXGI adapter enumeration via COM vtables, drive-type filtering, PDH CPU clock) cross-compiles and passes `go vet` for `GOOS=windows`, and the parsing and aggregation logic behind it is unit-tested. However, V1 was developed and run end-to-end on Linux, so check GPU numbers against Task Manager on your hardware.
-- **GPU temperature** is only available through `nvidia-smi` for NVIDIA cards. AMD and Intel GPU temperatures need vendor SDKs, which V1 doesn't use.
-- **CPU temperature on Windows** is usually unavailable or approximate. The only built-in source is ACPI thermal zones, which often need admin rights and often measure the motherboard rather than the CPU die. Accurate readings need a kernel driver (as used by LibreHardwareMonitor); V1 deliberately avoids shipping one.
+- **Windows validation.** The Windows-specific code (PDH queries, DXGI adapter enumeration via COM vtables, drive-type filtering, PDH CPU clock) cross-compiles and passes `go vet` for `GOOS=windows`, and the parsing and aggregation logic behind it is unit-tested. However, the agent was developed and run end-to-end on Linux, so check GPU numbers against Task Manager on your hardware.
+- **GPU temperature** is only available through `nvidia-smi` for NVIDIA cards. AMD and Intel GPU temperatures need vendor SDKs, which Net-Pulse doesn't use.
+- **CPU temperature on Windows** is usually unavailable or approximate. The only built-in source is ACPI thermal zones, which often need admin rights and often measure the motherboard rather than the CPU die. Accurate readings need a kernel driver (as used by LibreHardwareMonitor); Net-Pulse deliberately avoids shipping one.
 - **No SSD/HDD health (SMART).** Only capacity and throughput are reported.
 - **Process status** isn't exposed by the Windows API used, so it shows "—" there. Protected processes may show no path or CPU value without elevation.
-- **No process termination** or any other system modification, in V1 or V2.
+- **No process termination** or any other system modification, by design.
 - **Analysis thresholds are fixed** rules of thumb and are not yet configurable in Settings. Process CPU findings are point-in-time readings.
-- **Ask Sentinel** depends on an external service and its answers come from a language model: they are grounded in PC Sentinel's data but can still be imperfect. Treat them as explanations, not guarantees.
+- **Ask Pulse** depends on an external service and its answers come from a language model: they are grounded in Net-Pulse's data but can still be imperfect. Treat them as explanations, not guarantees.
 - Per-process GPU, disk and network usage aren't shown.
 - History averages hide spikes shorter than the bucket, except for CPU and GPU, which keep bucket peaks. Memory peak for long ranges is the peak of the bucket averages.
 - Single user and single machine. Binding to a non-loopback address is possible, but there is no authentication, so it isn't recommended.
 - `web/` has no `package-lock.json` in the repository yet; the first `npm install` creates one, and it should be committed.
 
-### Privacy
+## Privacy
 
 - All telemetry is collected, analysed and stored locally. There is no telemetry upload, no analytics and no update check.
-- **Ask Sentinel is the only feature that sends data off the machine**, and only when an API key is set *and* you ask a question. Each question sends the data listed in [Ask Sentinel](#ask-sentinel-ai-assistant-v2) to the Anthropic API. The hostname, file paths and the history database are never sent. Leave `ANTHROPIC_API_KEY` unset to keep PC Sentinel fully offline.
+- **Ask Pulse is the only feature that sends data off the machine**, and only when an API key is set *and* you ask a question. Each question sends the data listed in [Ask Pulse](#ask-pulse-ai-assistant) to the Anthropic API. The hostname, file paths and the history database are never sent. Leave `ANTHROPIC_API_KEY` unset to keep Net-Pulse fully offline.
 - The API is loopback-only by default, with host-header checks.
 - Network monitoring reads per-interface byte counters only. It never captures or inspects packets, connections, hostnames or URLs.
 - The history database holds numeric metrics, drive mount points and alert records. Process names and paths appear live in the UI but are never persisted.
-- Deleting `%APPDATA%\PCSentinel` removes all stored data.
-- Any off-device feature is opt-in and clearly labelled. In V2 that is Ask Sentinel alone.
+- Deleting `%APPDATA%\NetPulse` removes all stored data.
+- Any off-device feature is opt-in and clearly labelled. Today that is Ask Pulse alone.
 
-### Roadmap
+## Roadmap
 
 - Validate and tune the Windows GPU and CPU-clock paths on a range of NVIDIA, AMD and Intel systems.
 - Optional LibreHardwareMonitor integration for accurate CPU and GPU temperatures when the user has it installed.
@@ -619,4 +566,8 @@ Design choices that keep overhead low:
 - Export history to CSV and a "compare two time ranges" view.
 - Run as a background service or tray app with Windows toast notifications for critical alerts.
 - An installer (MSIX or WinGet manifest).
-- Make the V2 analysis thresholds configurable in Settings.
+- Make the analysis thresholds configurable in Settings.
+
+## Project history
+
+Net-Pulse started as a concurrent port scanner (V1) and became a reusable network diagnostics engine with a CLI (V2). PC Sentinel was a separate local Windows health monitor with a dashboard, performance analysis and an AI assistant. In November 2026 PC Sentinel was merged into this repository **with its full commit history** (`git log --graph` shows both lines joining) and the two were unified into one product and one binary.

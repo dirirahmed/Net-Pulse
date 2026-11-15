@@ -1,4 +1,4 @@
-// Package config loads, validates and persists PC Sentinel settings.
+// Package config loads, validates and persists Net-Pulse agent settings.
 package config
 
 import (

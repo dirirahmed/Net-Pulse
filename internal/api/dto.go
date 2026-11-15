@@ -84,7 +84,7 @@ type AnalysisResponse struct {
 	AI       AIStatus                   `json:"ai"`
 }
 
-// AIStatus tells the UI whether Ask Sentinel is available. It never includes
+// AIStatus tells the UI whether Ask Pulse is available. It never includes
 // the API key.
 type AIStatus struct {
 	Enabled bool   `json:"enabled"`

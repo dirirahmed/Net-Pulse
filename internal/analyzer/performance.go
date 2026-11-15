@@ -126,7 +126,7 @@ func AnalyzePerformance(in PerformanceInput) PerformanceReport {
 			r.note("Disk throughput counters are unavailable, so the disk activity check was skipped.")
 		}
 	} else {
-		r.note(fmt.Sprintf("Only %d seconds of history so far. The CPU, memory, GPU, disk activity and bottleneck checks start once PC Sentinel has 1 minute of data.",
+		r.note(fmt.Sprintf("Only %d seconds of history so far. The CPU, memory, GPU, disk activity and bottleneck checks start once Net-Pulse has 1 minute of data.",
 			int(span.Seconds())))
 	}
 
@@ -261,7 +261,7 @@ func diskIOFinding(read, write Stat, window string) *Finding {
 		Evidence: fmt.Sprintf("Disk throughput averaged %s over the %s (read %s, write %s).",
 			rateText(total), window, rateText(read.Avg), rateText(write.Avg)),
 		Explanation: "Sustained heavy disk activity can slow program launches and file access, especially on hard drives. " +
-			"PC Sentinel measures throughput, not how busy the drive is, so this shows heavy use rather than proving a bottleneck.",
+			"Net-Pulse measures throughput, not how busy the drive is, so this shows heavy use rather than proving a bottleneck.",
 		Recommendation: "Look for large downloads, game updates, backups, antivirus scans or file indexing running in the background, " +
 			"and let them finish or schedule them for when you aren't using the PC.",
 	}
@@ -425,7 +425,7 @@ func processFindings(procs []models.Process, totalMem uint64) []Finding {
 func summarizeFindings(findings []Finding, m SeriesSummary, span time.Duration, window string) (string, string) {
 	if len(findings) == 0 {
 		if span < minAnalysisCoverage {
-			return StatusCollecting, "Collecting data. PC Sentinel needs about a minute of history before it can judge sustained load."
+			return StatusCollecting, "Collecting data. Net-Pulse needs about a minute of history before it can judge sustained load."
 		}
 		s := fmt.Sprintf("No performance problems detected over the %s. CPU averaged %s and memory %s", window, pct(m.CPU.Avg), pct(m.Memory.Avg))
 		if m.GPU.Available {

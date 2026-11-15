@@ -75,7 +75,7 @@ func (s *Server) collectAnalysis(ctx context.Context) (analysisData, bool) {
 
 func (s *Server) aiStatus() AIStatus {
 	if s.ai == nil || !s.ai.Enabled() {
-		return AIStatus{Enabled: false, Reason: "Set the " + ai.EnvAPIKey + " environment variable and restart PC Sentinel to enable Ask Sentinel."}
+		return AIStatus{Enabled: false, Reason: "Set the " + ai.EnvAPIKey + " environment variable and restart Net-Pulse to enable Ask Pulse."}
 	}
 	return AIStatus{Enabled: true, Model: s.ai.Model()}
 }
@@ -129,7 +129,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, context.DeadlineExceeded):
 			status = http.StatusGatewayTimeout
 		}
-		s.log.Warn("ask sentinel failed", "err", err)
+		s.log.Warn("ask pulse failed", "err", err)
 		writeError(w, status, "AI request failed: "+err.Error())
 		return
 	}
