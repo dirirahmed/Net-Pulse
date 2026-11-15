@@ -71,3 +71,18 @@ func TestBuildURL(t *testing.T) {
 		t.Errorf("buildURL = %q", got)
 	}
 }
+
+func TestParseChecks(t *testing.T) {
+	if c, err := ParseChecks(""); err != nil || c != All() {
+		t.Fatalf("empty = %+v %v", c, err)
+	}
+	c, err := ParseChecks(" DNS, tls ,https")
+	if err != nil || !c.DNS || !c.TLS || !c.HTTP || c.Ports || c.TCP {
+		t.Fatalf("list = %+v %v", c, err)
+	}
+	for _, bad := range []string{"banana", ",,", "dns,ftp"} {
+		if _, err := ParseChecks(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

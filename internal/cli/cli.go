@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/dirirahmed/Net-Pulse/internal/engine"
@@ -107,33 +106,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// parseChecks is kept as the CLI's name for engine.ParseChecks.
 func parseChecks(spec string) (engine.Checks, error) {
-	trimmed := strings.ToLower(strings.TrimSpace(spec))
-	if trimmed == "" || trimmed == "all" {
-		return engine.All(), nil
-	}
-
-	var c engine.Checks
-	for _, part := range strings.Split(trimmed, ",") {
-		switch strings.TrimSpace(part) {
-		case "":
-			continue
-		case "dns":
-			c.DNS = true
-		case "ports", "scan":
-			c.Ports = true
-		case "tcp":
-			c.TCP = true
-		case "tls":
-			c.TLS = true
-		case "http", "https":
-			c.HTTP = true
-		default:
-			return c, fmt.Errorf("unknown check %q", part)
-		}
-	}
-	if !c.Any() {
-		return c, errors.New("no checks selected")
-	}
-	return c, nil
+	return engine.ParseChecks(spec)
 }

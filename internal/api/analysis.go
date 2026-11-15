@@ -197,7 +197,7 @@ func (s *Server) aiContext(d analysisData) ai.Context {
 	for _, dk := range snap.Disks {
 		c.System.Drives = append(c.System.Drives, ai.Drive{Mountpoint: dk.Mountpoint, TotalBytes: dk.TotalBytes, FreePercent: dk.FreePercent})
 	}
-	for _, a := range s.src.ActiveAlerts() {
+	for _, a := range s.activeAlerts() {
 		c.ActiveAlerts = append(c.ActiveAlerts, ai.AlertInfo{Severity: string(a.Severity), Title: a.Title, Reason: a.Reason})
 	}
 	if d.procs != nil {

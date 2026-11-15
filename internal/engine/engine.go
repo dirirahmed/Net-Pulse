@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -26,6 +27,40 @@ type Checks struct {
 // All enables every diagnostic.
 func All() Checks {
 	return Checks{DNS: true, Ports: true, TCP: true, TLS: true, HTTP: true}
+}
+
+// ParseChecks accepts "all" (or an empty string) or a comma separated list
+// of dns, ports, tcp, tls and http. "scan" and "https" are accepted as
+// aliases for ports and http.
+func ParseChecks(spec string) (Checks, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(spec))
+	if trimmed == "" || trimmed == "all" {
+		return All(), nil
+	}
+
+	var c Checks
+	for _, part := range strings.Split(trimmed, ",") {
+		switch strings.TrimSpace(part) {
+		case "":
+			continue
+		case "dns":
+			c.DNS = true
+		case "ports", "scan":
+			c.Ports = true
+		case "tcp":
+			c.TCP = true
+		case "tls":
+			c.TLS = true
+		case "http", "https":
+			c.HTTP = true
+		default:
+			return c, fmt.Errorf("unknown check %q", part)
+		}
+	}
+	if !c.Any() {
+		return c, errors.New("no checks selected")
+	}
+	return c, nil
 }
 
 // Any reports whether at least one check is enabled.

@@ -43,7 +43,8 @@ type Server struct {
 	boot   config.Config // settings the HTTP listener was started with
 	static fs.FS
 	log    *slog.Logger
-	ai     Assistant // optional (V2); nil or disabled when no API key is set
+	ai     Assistant // optional; nil or disabled when no API key is set
+	net    Network   // optional; nil disables the network endpoints
 }
 
 // New creates the API server. static may be nil (API-only mode).
@@ -77,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("GET /api/analysis", s.handleAnalysis)
 	mux.HandleFunc("POST /api/ai/ask", s.handleAsk)
+	s.networkRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")
 	})
@@ -100,7 +102,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, SystemResponse{
 		Host: s.src.Host(), Timestamp: snap.Timestamp, Uptime: snap.UptimeSeconds, Health: s.src.Health(),
 		CPU: snap.CPU, Memory: snap.Memory, GPU: snap.GPU, Disks: snap.Disks, DiskIO: snap.DiskIO,
-		Network: snap.Network, ActiveAlerts: s.src.ActiveAlerts(), Collectors: snap.Collectors, Agent: s.src.Agent(),
+		Network: snap.Network, ActiveAlerts: s.activeAlerts(), Collectors: snap.Collectors, Agent: s.src.Agent(),
 	})
 }
 
@@ -225,7 +227,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	resp := AlertsResponse{Active: s.src.ActiveAlerts(), History: []models.Alert{}}
+	resp := AlertsResponse{Active: s.activeAlerts(), History: []models.Alert{}}
 	days := s.cfg.Get().RetentionDays
 	hist, err := s.src.AlertHistory(r.Context(), time.Now().AddDate(0, 0, -days), limit)
 	if err != nil {
@@ -262,6 +264,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.src.Reconfigure()
+	if s.net != nil {
+		s.net.Reconfigure()
+	}
 	s.log.Info("settings updated")
 	writeJSON(w, http.StatusOK, s.settingsResponse(next))
 }

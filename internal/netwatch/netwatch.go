@@ -104,6 +104,8 @@ type Service struct {
 	wake  chan struct{}
 	sem   chan struct{}
 	wg    sync.WaitGroup
+	// scanMu allows one on-demand scan at a time.
+	scanMu sync.Mutex
 
 	mu         sync.Mutex
 	order      []string // configured order, for stable listing

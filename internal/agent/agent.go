@@ -118,7 +118,7 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 		log.Info("Ask Pulse disabled; set " + ai.EnvAPIKey + " to enable it")
 	}
 	srv := &http.Server{
-		Handler:           api.New(mon, cfgStore, static, log).WithAssistant(assistant).Handler(),
+		Handler:           api.New(mon, cfgStore, static, log).WithAssistant(assistant).WithNetwork(nw).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

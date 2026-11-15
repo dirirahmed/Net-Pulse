@@ -145,7 +145,7 @@ Two checks, because neither is enough alone. `CheckTarget` resolves the name and
 
 ## Network monitoring
 
-`netpulse serve` checks every target in `network.targets` every `checkIntervalSeconds` (default 60 s) using the same engine as `netpulse scan`: DNS, a TCP connection to the target's port, a verifying TLS handshake on TLS ports or `https://` URLs, and an HTTP request on HTTP ports or URLs. Port scans are not part of scheduled checks. Targets are configured in `config.json` for now:
+`netpulse serve` checks every target in `network.targets` every `checkIntervalSeconds` (default 60 s) using the same engine as `netpulse scan`: DNS, a TCP connection to the target's port, a verifying TLS handshake on TLS ports or `https://` URLs, and an HTTP request on HTTP ports or URLs. Port scans are not part of scheduled checks. Targets are added and removed through the API (`POST /api/targets`, `DELETE /api/targets/{id}`) or in `config.json`:
 
 ```json
 "network": {
@@ -407,6 +407,12 @@ All endpoints are `GET` unless noted, return JSON, and are served only on the lo
 | `PUT /api/settings` | Update configuration (partial JSON is merged; validated; persisted) |
 | `/api/analysis` | Performance analysis (status, summary, findings, recommendations, notes, 5-minute metrics) and whether Ask Pulse is enabled |
 | `POST /api/ai/ask` | `{"question": "...", "history": [{"role": "user"\|"assistant", "content": "..."}]}` → `{"answer", "model", "generatedAt", "analysis"}`. Returns `503` when no API key is configured, `502`/`504` for upstream errors or timeouts |
+| `/api/targets` | Monitored targets: live status, last check with timings, recent checks, consecutive failures, next check time and 24-hour uptime |
+| `POST /api/targets` | Add a target: `{"name": "...", "target": "..."}` → `201` with the new target. The id is derived from the name. `422` with `"blocked": true` if the guard would refuse it |
+| `DELETE /api/targets/{id}` | Remove a target (`204`); its alerts resolve |
+| `/api/targets/{id}/history?range=24h` | Bucketed checks (up / degraded / down counts, average and peak response time) and uptime for the range |
+| `POST /api/targets/{id}/check` | Run the next check now (`202`) |
+| `POST /api/scan` | On-demand diagnostics: `{"target": "...", "checks": ["dns","ports","tcp","tls","http"], "ports": "22,80,443"}` → `{"report": ...}`, the same report as `netpulse scan -json`. Checks default to all and ports to the CLI's default list, at most 1024 ports. One scan at a time (`429` while busy); `422` with `"blocked": true` for refused targets |
 
 Ranges: `5m`, `15m`, `30m`, `1h`, `6h`, `24h`, `7d`. Before the first sample completes, telemetry endpoints return `503`. If the history database is unavailable, long ranges return `503` while live endpoints keep working.
 
@@ -434,7 +440,8 @@ Security hardening, since any web page can try to reach `localhost`:
 - The agent binds to `127.0.0.1` by default.
 - Requests whose `Host` header isn't a loopback name are rejected, which blocks DNS-rebinding pages.
 - CORS is not enabled.
-- `PUT /api/settings` and `POST /api/ai/ask` require `Content-Type: application/json`, which a cross-site form can't send.
+- Every `POST` and `PUT` endpoint requires `Content-Type: application/json`, which a cross-site form can't send.
+- Scans and monitored targets go through Net-Pulse's target guard, so a page or person using the API can't reach loopback, the LAN or cloud metadata addresses unless `allowPrivateTargets` is on.
 - The Anthropic API key stays in the agent's environment. No endpoint returns it.
 - Responses carry a strict CSP and `nosniff`.
 
@@ -538,6 +545,7 @@ What the tests cover:
 - **config:** defaults, partial files, invalid values, threshold ordering, atomic persistence, and example-file parity.
 - **analysis:** CPU and memory detection at each severity boundary, the 1-minute coverage rule, per-program CPU and memory detection with same-name grouping and the idle process excluded, the CPU/GPU bottleneck rule and its exclusions (busy, idle or unmeasured GPU), disk activity and free space, severity ordering and recommendation de-duplication.
 - **ai** (fake Anthropic server via `httptest`): disabled without a key, environment configuration, request headers and body (system prompt, conversation, findings in the data block), answer parsing, error mapping (401, 429, 529, non-JSON), truncated and empty answers, timeouts, and that the key never appears in errors.
+- **api, network endpoints:** target list with uptime and without history, adding (id derivation and de-duplication, validation, the target limit, guard refusals with `"blocked": true`, content-type enforcement), deleting, history ranges and errors, check-now, scan request parsing and defaults, the 1024-port cap, busy and blocked scans, network alerts merged into `/api/system` and `/api/alerts` most severe first, and settings changes reaching the network monitor.
 - **api, analysis endpoints:** `/api/analysis` built from series data, graceful degradation without history or processes, AI status reporting, `/api/ai/ask` disabled / success / validation / history sanitising / upstream errors, and that the hostname never reaches the model.
 - **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building.
 

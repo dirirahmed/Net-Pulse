@@ -7,6 +7,8 @@ import (
 	"github.com/dirirahmed/Net-Pulse/internal/analyzer"
 	"github.com/dirirahmed/Net-Pulse/internal/config"
 	"github.com/dirirahmed/Net-Pulse/internal/models"
+	"github.com/dirirahmed/Net-Pulse/internal/netwatch"
+	"github.com/dirirahmed/Net-Pulse/internal/result"
 )
 
 // Response shapes. Telemetry structs from models are embedded as-is; these
@@ -107,6 +109,56 @@ type AskResponse struct {
 	Analysis analyzer.PerformanceReport `json:"analysis"`
 }
 
+// ---- network monitoring and diagnostics ----
+
+// TargetView is one monitored target with its 24-hour uptime.
+type TargetView struct {
+	netwatch.TargetStatus
+	// Uptime24h is the share of checks in the last 24 hours that reached the
+	// target (up or degraded); nil without history or before any check.
+	Uptime24h *float64 `json:"uptime24h"`
+	Checks24h int      `json:"checks24h"`
+}
+
+type TargetsResponse struct {
+	Targets              []TargetView `json:"targets"`
+	AllowPrivateTargets  bool         `json:"allowPrivateTargets"`
+	CheckIntervalSeconds int          `json:"checkIntervalSeconds"`
+	MaxTargets           int          `json:"maxTargets"`
+	HistoryAvailable     bool         `json:"historyAvailable"`
+	HistoryError         string       `json:"historyError,omitempty"`
+}
+
+type AddTargetRequest struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+type TargetHistoryResponse struct {
+	ID            string                 `json:"id"`
+	Range         string                 `json:"range"`
+	BucketSeconds float64                `json:"bucketSeconds"`
+	Points        []models.NetCheckPoint `json:"points"`
+	Uptime        models.NetUptime       `json:"uptime"`
+	UptimePercent *float64               `json:"uptimePercent"`
+}
+
+// ScanRequest is the body of POST /api/scan. Checks defaults to all of
+// dns, ports, tcp, tls and http; Ports takes the same spec as the CLI's
+// -ports flag and is capped at netwatch.MaxScanPorts.
+type ScanRequest struct {
+	Target string   `json:"target"`
+	Checks []string `json:"checks,omitempty"`
+	Ports  string   `json:"ports,omitempty"`
+}
+
+type ScanResponse struct {
+	Report result.Report `json:"report"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
+	// Blocked marks a target refused by the private-address guard, so the
+	// UI can point at the setting.
+	Blocked bool `json:"blocked,omitempty"`
 }
