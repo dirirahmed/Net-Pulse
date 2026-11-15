@@ -39,7 +39,23 @@ type NetCheck struct {
 	CertDaysLeft *int `json:"certDaysLeft"`
 	// Problem is a one-line reason when Status is not up.
 	Problem string `json:"problem,omitempty"`
+	// Reason is a coarse code for Problem (see the NetReason constants).
+	// It carries no addresses or error text, so it is safe to summarise or
+	// send on where the raw Problem is not.
+	Reason string `json:"reason,omitempty"`
 }
+
+// Reason codes for NetCheck.Reason.
+const (
+	NetReasonDNS          = "dns"
+	NetReasonConnect      = "connect"
+	NetReasonTLSHandshake = "tls_handshake"
+	NetReasonCertificate  = "certificate"
+	NetReasonHTTP         = "http"
+	NetReasonServerError  = "server_error"
+	NetReasonSlow         = "slow"
+	NetReasonBlocked      = "blocked"
+)
 
 // NetCheckPoint is a bucket of checks for long-range charts.
 type NetCheckPoint struct {

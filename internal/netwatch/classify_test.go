@@ -44,41 +44,42 @@ func TestClassifyOutcomes(t *testing.T) {
 		mutate  func(*result.Report)
 		status  models.NetStatus
 		problem string
+		reason  string
 	}{
 		{"dns failure", func(r *result.Report) {
 			r.DNS = &result.DNSResult{Status: result.StatusError, Error: &result.ProbeError{Kind: result.ErrKindDNS, Message: "no such host"}}
 			r.TCP, r.TLS, r.HTTP = nil, nil, nil
-		}, models.NetDown, "DNS lookup failed: no such host"},
+		}, models.NetDown, "DNS lookup failed: no such host", "dns"},
 		{"connection refused", func(r *result.Report) {
 			r.TCP = &result.TCPResult{Address: "1.2.3.4:443", Status: result.StatusClosed, Error: &result.ProbeError{Kind: result.ErrKindRefused, Message: "refused"}}
-		}, models.NetDown, "TCP connection to 1.2.3.4:443 failed: refused"},
+		}, models.NetDown, "TCP connection to 1.2.3.4:443 failed: refused", "connect"},
 		{"tls handshake failure", func(r *result.Report) {
 			r.TLS = &result.TLSResult{Status: result.StatusError, Error: &result.ProbeError{Kind: result.ErrKindTLS, Message: "handshake failure"}}
-		}, models.NetDown, "TLS handshake failed"},
+		}, models.NetDown, "TLS handshake failed", "tls_handshake"},
 		{"certificate does not verify", func(r *result.Report) {
 			bad := &result.ProbeError{Kind: result.ErrKindCertificate, Message: "certificate has expired"}
 			r.TLS = &result.TLSResult{Status: result.StatusError, VerifyError: bad, Error: bad, HandshakeDuration: ms(30),
 				Certificates: []result.Certificate{{DaysUntilExpiry: -3}}}
 			r.HTTP = &result.HTTPResult{Status: result.StatusError, Error: bad}
-		}, models.NetDegraded, "TLS certificate is not valid: certificate has expired"},
-		{"server error", func(r *result.Report) { r.HTTP.StatusCode = 503 }, models.NetDegraded, "HTTP 503"},
-		{"not found is still up", func(r *result.Report) { r.HTTP.StatusCode = 404 }, models.NetUp, ""},
-		{"slow", func(r *result.Report) { r.HTTP.Duration = ms(2400) }, models.NetDegraded, "slow response: 2400 ms (limit 1500 ms)"},
+		}, models.NetDegraded, "TLS certificate is not valid: certificate has expired", "certificate"},
+		{"server error", func(r *result.Report) { r.HTTP.StatusCode = 503 }, models.NetDegraded, "HTTP 503", "server_error"},
+		{"not found is still up", func(r *result.Report) { r.HTTP.StatusCode = 404 }, models.NetUp, "", ""},
+		{"slow", func(r *result.Report) { r.HTTP.Duration = ms(2400) }, models.NetDegraded, "slow response: 2400 ms (limit 1500 ms)", "slow"},
 		{"http transport error", func(r *result.Report) {
 			r.HTTP = &result.HTTPResult{Status: result.StatusTimeout, Error: &result.ProbeError{Kind: result.ErrKindTimeout, Message: "timeout"}}
-		}, models.NetDown, "HTTP request failed: timeout"},
+		}, models.NetDown, "HTTP request failed: timeout", "http"},
 		{"down beats degraded", func(r *result.Report) {
 			r.HTTP.StatusCode = 503
 			r.TLS = &result.TLSResult{Status: result.StatusError, Error: &result.ProbeError{Kind: result.ErrKindTLS, Message: "eof"}}
-		}, models.NetDown, "TLS handshake failed: eof"},
+		}, models.NetDown, "TLS handshake failed: eof", "tls_handshake"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := healthy()
 			tc.mutate(&rep)
 			c := Classify(rep, "site", 1500)
-			if c.Status != tc.status || !strings.Contains(c.Problem, tc.problem) {
-				t.Errorf("got %s %q, want %s containing %q", c.Status, c.Problem, tc.status, tc.problem)
+			if c.Status != tc.status || !strings.Contains(c.Problem, tc.problem) || c.Reason != tc.reason {
+				t.Errorf("got %s %q (%s), want %s containing %q (%s)", c.Status, c.Problem, c.Reason, tc.status, tc.problem, tc.reason)
 			}
 		})
 	}

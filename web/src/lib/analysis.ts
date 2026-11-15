@@ -4,6 +4,7 @@ import { severityTone, type Tone } from "./status";
 
 export const SUGGESTED_QUESTIONS = [
   "Why is my PC slow?",
+  "Is it my PC or my internet?",
   "What's causing the biggest problem?",
   "Is my PC CPU or GPU limited?",
   "What should I fix first?",

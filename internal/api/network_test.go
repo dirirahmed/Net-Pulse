@@ -26,9 +26,15 @@ type fakeNetwork struct {
 	lastScan   *netwatch.ScanRequest
 	checked    string
 	reconfigs  int
+	// statuses and alerts, when set, replace the defaults derived from config.
+	statuses []netwatch.TargetStatus
+	alerts   []models.Alert
 }
 
 func (f *fakeNetwork) Targets() []netwatch.TargetStatus {
+	if f.statuses != nil {
+		return f.statuses
+	}
 	out := []netwatch.TargetStatus{}
 	for _, t := range f.cfg.Get().Network.Targets {
 		out = append(out, netwatch.TargetStatus{ID: t.ID, Name: t.Name, Target: t.Target, Status: models.NetUp})
@@ -51,6 +57,9 @@ func (f *fakeNetwork) CheckNow(id string) error {
 	return nil
 }
 func (f *fakeNetwork) ActiveAlerts() []models.Alert {
+	if f.alerts != nil {
+		return f.alerts
+	}
 	return []models.Alert{{ID: "n", Rule: "net_down", Component: "network", Severity: models.SeverityCritical}}
 }
 func (f *fakeNetwork) History(_ context.Context, id string, _ time.Duration, _ int) ([]models.NetCheckPoint, time.Duration, error) {

@@ -304,16 +304,16 @@ func (s *Service) probe(ctx context.Context, t config.NetTarget, n config.Networ
 
 	target, err := engine.ParseTarget(t.Target)
 	if err != nil {
-		return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetDown, Problem: "invalid target: " + err.Error()}
+		return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetDown, Reason: models.NetReasonDNS, Problem: "invalid target: " + err.Error()}
 	}
 	guard := &safety.Guard{AllowPrivate: n.AllowPrivateTargets}
 	if err := guard.CheckTarget(ctx, target.Host); err != nil {
 		var blocked *safety.BlockedError
 		if errors.As(err, &blocked) {
-			return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetBlocked,
+			return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetBlocked, Reason: models.NetReasonBlocked,
 				Problem: blocked.Error() + ". Turn on \"Allow private targets\" in Settings to monitor it."}
 		}
-		return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetDown, Problem: "DNS lookup failed: " + err.Error()}
+		return models.NetCheck{TargetID: t.ID, Timestamp: start, Status: models.NetDown, Reason: models.NetReasonDNS, Problem: "DNS lookup failed: " + err.Error()}
 	}
 
 	rep := s.run(ctx, target, engine.Options{

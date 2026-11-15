@@ -289,7 +289,7 @@ These are rules of thumb for a typical desktop. The score is a quick summary of 
 
 ## Performance analysis
 
-`internal/analyzer/performance.go` runs on request (`GET /api/analysis`, and before every Ask Pulse question). It uses data Net-Pulse already has: the in-memory history for the last 5 minutes, the latest snapshot, and the process list. There is no machine learning or statistical modelling, only the thresholds below.
+`internal/analyzer/performance.go` runs on request (`GET /api/analysis`, and before every Ask Pulse question). It uses data Net-Pulse already has: the in-memory history for the last 5 minutes, the latest snapshot, the process list, and the latest state of every monitored network target (`internal/analyzer/network.go`). There is no machine learning or statistical modelling, only the thresholds below.
 
 | Finding | Rule (defaults) | Severity |
 | --- | --- | --- |
@@ -301,10 +301,16 @@ These are rules of thumb for a typical desktop. The score is a quick summary of 
 | High GPU usage | 5-minute GPU average ≥ 85 % / ≥ 97 % (normal while gaming, so never critical) | info / warning |
 | Possible CPU bottleneck | CPU average ≥ 80 %, GPU average between 15 % and 60 %, and CPU at least 25 points above GPU | warning |
 | Low free space | Drive free space at or below the configured disk thresholds (10 % / 5 %) | warning / critical |
+| All monitored targets unreachable | At least 2 targets checked and every one failed its last check. Points at this PC's connection (Wi-Fi or cable, router, DNS, VPN); when every name failed to resolve, at DNS specifically | critical |
+| Network target unreachable | A target failed its last check while others are fine, so the problem is that service or the route to it | warning; critical from `failuresBeforeAlert` checks in a row |
+| Network target slow / server errors / bad certificate | The last check was degraded: response ≥ `slowResponseMs`, an HTTP 5xx, or a certificate that doesn't validate | warning |
+| TLS certificate expiring | ≤ 21 / ≤ 7 days left, or expired (the configured `certExpiry` days) | warning / critical |
+| Network target had outages | Reachable now, but under 99 % of at least 10 checks in the last 24 hours succeeded | info |
 
 - Each finding carries: **issue** (title), **severity**, **explanation**, **evidence** quoting the measured values (for example *"CPU averaged 91% over the last 5 minutes while GPU usage averaged 48%."*), and a **suggested action**. Recommendations are de-duplicated and ordered by severity.
 - The overall status is the highest finding severity, `ok` when nothing is found, or `collecting` when there isn't enough history yet.
 - **Nothing is guessed.** The sustained checks only run once there is at least 1 minute of history. If GPU utilization, disk counters or the process list aren't available, the related checks are skipped and a note says why.
+- **Is it the PC or the network?** When every finding is a network finding, the summary says so: *"The PC itself looks fine: no CPU, memory, GPU or disk problems were found."* Network findings are built from target names and a coarse reason code (`dns`, `connect`, `tls_handshake`, `certificate`, `http`, `server_error`, `slow`), never from raw error text, so they carry no IP addresses. Blocked targets are skipped with a note, as is the whole network section when no targets are configured.
 - The Windows *System Idle Process* is ignored (its "CPU use" is idle time). Programs split across many processes, like browsers, are judged as one program.
 - The bottleneck rule needs some GPU activity: an idle GPU has no work to be starved of, so a CPU-only job such as compiling shows as high CPU, not as a bottleneck.
 - Process CPU is a point-in-time reading (the same one the Processes page shows), so a program that is just starting up can briefly appear.
@@ -318,9 +324,10 @@ Ask Pulse explains the analysis in plain language and answers follow-up question
 - the analysis report (findings, 5-minute averages and peaks, notes about skipped checks);
 - the health score and active alerts;
 - basic hardware and current usage (OS version, CPU model and cores, RAM size, GPU names and usage, drive letters, sizes and free space);
-- the top 5 programs by CPU and by memory (names and usage only).
+- the top 5 programs by CPU and by memory (names and usage only);
+- each monitored network target's status, reason code, consecutive failures, last response time, HTTP status, certificate days left and 24-hour uptime, **by name only**. A target with no name of its own is named after its address, so it is sent as *"Monitored target N"* instead. Network alerts are sent with a rewritten reason, because their stored reason quotes the raw error and with it resolved IP addresses.
 
-The system prompt tells the model to base every statement on that data, quote the actual numbers, say when something wasn't measured, only report issues that appear in the findings or alerts, and never recommend registry edits, "optimizer" tools or disabling security software. Hostname, file paths and user names are never sent.
+The system prompt tells the model to base every statement on that data, quote the actual numbers, say when something wasn't measured, only report issues that appear in the findings or alerts, tell "this PC" problems from network problems (one target down vs. all of them), and never recommend registry edits, "optimizer" tools or disabling security software. Hostname, file paths, user names and monitored addresses are never sent.
 
 **Configure the API key.** The key is read from an environment variable on the machine running the agent. It is never written to disk by Net-Pulse, never logged and never sent to the browser.
 
@@ -544,8 +551,9 @@ What the tests cover:
 - **monitor:** snapshot publication, alert persistence, downsampling arithmetic, continued monitoring during storage failures and recovery, live-only operation without a database, ring-buffer trimming, and window-coverage rules.
 - **api** (`httptest`): 503 before the first sample, JSON shape and `null` for unavailable data, range summaries, graceful degradation when history fails, bad ranges and limits, settings validation and partial updates, restart-required reporting, rejection of foreign `Host` headers, the SPA fallback and asset caching.
 - **config:** defaults, partial files, invalid values, threshold ordering, atomic persistence, and example-file parity.
-- **analysis:** CPU and memory detection at each severity boundary, the 1-minute coverage rule, per-program CPU and memory detection with same-name grouping and the idle process excluded, the CPU/GPU bottleneck rule and its exclusions (busy, idle or unmeasured GPU), disk activity and free space, severity ordering and recommendation de-duplication.
+- **analysis:** CPU and memory detection at each severity boundary, the 1-minute coverage rule, per-program CPU and memory detection with same-name grouping and the idle process excluded, the CPU/GPU bottleneck rule and its exclusions (busy, idle or unmeasured GPU), disk activity and free space, severity ordering and recommendation de-duplication. Network: healthy targets, one target down (blaming the service, warning before `failuresBeforeAlert`), every target down (blaming the connection, DNS when every name failed), slow / server-error / bad-certificate targets, certificate expiry, the uptime rule's minimum check count, blocked-target notes, the "PC looks fine" summary only when there are no PC findings, and that no raw error text reaches a finding.
 - **ai** (fake Anthropic server via `httptest`): disabled without a key, environment configuration, request headers and body (system prompt, conversation, findings in the data block), answer parsing, error mapping (401, 429, 529, non-JSON), truncated and empty answers, timeouts, and that the key never appears in errors.
+- **api, analysis with network targets:** network findings on `/api/analysis` (with certificate days kept from an earlier check), the empty-targets note, and Ask Pulse privacy: an internal hostname, an IP from a raw error, `dial tcp` text and an unnamed target's domain never reach the model, user-chosen names do, unnamed targets become *"Monitored target N"*, and network alerts are rewritten.
 - **api, network endpoints:** target list with uptime and without history, adding (id derivation and de-duplication, validation, the target limit, guard refusals with `"blocked": true`, content-type enforcement), deleting, history ranges and errors, check-now, scan request parsing and defaults, the 1024-port cap, busy and blocked scans, network alerts merged into `/api/system` and `/api/alerts` most severe first, and settings changes reaching the network monitor.
 - **api, analysis endpoints:** `/api/analysis` built from series data, graceful degradation without history or processes, AI status reporting, `/api/ai/ask` disabled / success / validation / history sanitising / upstream errors, and that the hostname never reaches the model.
 - **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building; network status and uptime tones (uptime never rounds up to 100%), millisecond formatting, certificate thresholds, response sparklines with gaps for failed checks, per-bucket availability, target input validation, open-ports-first sorting and the scan verdict.
@@ -605,7 +613,7 @@ Design choices that keep overhead low:
 ## Privacy
 
 - All telemetry is collected, analysed and stored locally. There is no telemetry upload, no analytics and no update check.
-- **Ask Pulse is the only feature that sends data off the machine**, and only when an API key is set *and* you ask a question. Each question sends the data listed in [Ask Pulse](#ask-pulse-ai-assistant) to the Anthropic API. The hostname, file paths and the history database are never sent. Leave `ANTHROPIC_API_KEY` unset to keep Net-Pulse fully offline.
+- **Ask Pulse is the only feature that sends data off the machine**, and only when an API key is set *and* you ask a question. Each question sends the data listed in [Ask Pulse](#ask-pulse-ai-assistant) to the Anthropic API. The hostname, file paths, monitored target addresses and the history database are never sent. Leave `ANTHROPIC_API_KEY` unset to keep Net-Pulse fully offline.
 - The API is loopback-only by default, with host-header checks.
 - Throughput monitoring reads per-interface byte counters only. It never captures or inspects packets, connections, hostnames or URLs.
 - **Network targets are the agent's only other outbound connections**, and only to the hosts you add. Requests identify themselves with the `net-pulse/2.0` user agent.

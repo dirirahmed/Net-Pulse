@@ -19,9 +19,9 @@ import (
 // problem of the worst status is kept as the one-line reason.
 func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 	c := models.NetCheck{TargetID: targetID, Timestamp: rep.StartedAt.UTC(), Status: models.NetUp}
-	mark := func(s models.NetStatus, format string, args ...any) {
+	mark := func(s models.NetStatus, reason, format string, args ...any) {
 		if rank(s) > rank(c.Status) {
-			c.Status, c.Problem = s, fmt.Sprintf(format, args...)
+			c.Status, c.Reason, c.Problem = s, reason, fmt.Sprintf(format, args...)
 		}
 	}
 
@@ -30,7 +30,7 @@ func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 			c.DNSMs = millis(d.Duration)
 		}
 		if d.Status != result.StatusOK {
-			mark(models.NetDown, "DNS lookup failed: %s", errText(d.Error))
+			mark(models.NetDown, models.NetReasonDNS, "DNS lookup failed: %s", errText(d.Error))
 		}
 	}
 
@@ -38,7 +38,7 @@ func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 		if t.Status == result.StatusOK {
 			c.ConnectMs = millis(t.Duration)
 		} else {
-			mark(models.NetDown, "TCP connection to %s failed: %s", t.Address, errText(t.Error))
+			mark(models.NetDown, models.NetReasonConnect, "TCP connection to %s failed: %s", t.Address, errText(t.Error))
 		}
 	}
 
@@ -55,9 +55,9 @@ func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 			// The handshake itself worked; the chain didn't validate.
 			certFailed = true
 			c.TLSMs = millis(t.HandshakeDuration)
-			mark(models.NetDegraded, "TLS certificate is not valid: %s", errText(t.VerifyError))
+			mark(models.NetDegraded, models.NetReasonCertificate, "TLS certificate is not valid: %s", errText(t.VerifyError))
 		default:
-			mark(models.NetDown, "TLS handshake failed: %s", errText(t.Error))
+			mark(models.NetDown, models.NetReasonTLSHandshake, "TLS handshake failed: %s", errText(t.Error))
 		}
 	}
 
@@ -69,17 +69,17 @@ func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 			c.TTFBMs = millis(h.TTFB)
 			c.ResponseMs = millis(h.Duration)
 			if code >= 500 {
-				mark(models.NetDegraded, "the server answered HTTP %d", code)
+				mark(models.NetDegraded, models.NetReasonServerError, "the server answered HTTP %d", code)
 			}
 		case h.Error != nil && h.Error.Kind == result.ErrKindCertificate:
 			// Same root cause as a TLS verify failure, which may already be
 			// recorded; on its own (for example after a redirect to another
 			// host) it is still a certificate problem, not an outage.
 			if !certFailed {
-				mark(models.NetDegraded, "TLS certificate is not valid: %s", errText(h.Error))
+				mark(models.NetDegraded, models.NetReasonCertificate, "TLS certificate is not valid: %s", errText(h.Error))
 			}
 		default:
-			mark(models.NetDown, "HTTP request failed: %s", errText(h.Error))
+			mark(models.NetDown, models.NetReasonHTTP, "HTTP request failed: %s", errText(h.Error))
 		}
 	}
 
@@ -88,7 +88,7 @@ func Classify(rep result.Report, targetID string, slowMs int) models.NetCheck {
 		c.ResponseMs = c.ConnectMs
 	}
 	if c.ResponseMs != nil && slowMs > 0 && *c.ResponseMs >= float64(slowMs) {
-		mark(models.NetDegraded, "slow response: %.0f ms (limit %d ms)", *c.ResponseMs, slowMs)
+		mark(models.NetDegraded, models.NetReasonSlow, "slow response: %.0f ms (limit %d ms)", *c.ResponseMs, slowMs)
 	}
 	return c
 }

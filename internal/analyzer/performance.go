@@ -61,7 +61,7 @@ const (
 type Finding struct {
 	ID             string          `json:"id"`
 	Rule           string          `json:"rule"`
-	Category       string          `json:"category"` // cpu, memory, gpu, disk, process
+	Category       string          `json:"category"` // cpu, memory, gpu, disk, process, network
 	Target         string          `json:"target,omitempty"`
 	Severity       models.Severity `json:"severity"`
 	Title          string          `json:"title"`
@@ -98,6 +98,10 @@ type PerformanceInput struct {
 	// Processes is nil when the process list couldn't be read.
 	Processes []models.Process
 	DiskFree  config.Threshold
+	// Network holds the monitored targets. Nil means network monitoring
+	// isn't available; empty means no targets are configured.
+	Network         []NetTarget
+	NetworkSettings config.Network
 }
 
 // AnalyzePerformance runs every rule and returns findings sorted most severe first.
@@ -146,6 +150,14 @@ func AnalyzePerformance(in PerformanceInput) PerformanceReport {
 			r.add(diskSpaceFinding(d, in.DiskFree))
 		}
 	}
+	if in.Network != nil {
+		if len(in.Network) == 0 {
+			r.note(networkTargetsNote)
+		}
+		found, notes := networkFindings(in.Network, in.NetworkSettings)
+		r.Findings = append(r.Findings, found...)
+		r.Notes = append(r.Notes, notes...)
+	}
 
 	sort.SliceStable(r.Findings, func(i, j int) bool {
 		return r.Findings[i].Severity.Rank() > r.Findings[j].Severity.Rank()
@@ -158,6 +170,10 @@ func AnalyzePerformance(in PerformanceInput) PerformanceReport {
 		}
 	}
 	r.Status, r.Summary = summarizeFindings(r.Findings, m, span, window)
+	if onlyNetwork(r.Findings) && span >= minAnalysisCoverage {
+		// Answers the question people usually have: is it my PC or the network?
+		r.Summary = joinSentence(r.Summary, "The PC itself looks fine: no CPU, memory, GPU or disk problems were found.")
+	}
 	return r
 }
 
@@ -438,7 +454,12 @@ func summarizeFindings(findings []Finding, m SeriesSummary, span time.Duration, 
 	if len(findings) > 1 {
 		issues = fmt.Sprintf("%d issues", len(findings))
 	}
-	return string(top.Severity), fmt.Sprintf("%s found. Most important: %s. %s", issues, strings.ToLower(top.Title[:1])+top.Title[1:], top.Evidence)
+	title := top.Title
+	if top.Category != "network" {
+		// Network titles start with a name the user chose; keep its case.
+		title = strings.ToLower(title[:1]) + title[1:]
+	}
+	return string(top.Severity), fmt.Sprintf("%s found. Most important: %s. %s", issues, title, top.Evidence)
 }
 
 func seriesSpan(pts []models.HistoryPoint) time.Duration {
