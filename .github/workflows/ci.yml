@@ -2,29 +2,51 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v7
         with:
-          go-version: '1.21'
+          node-version: 22
 
-      - name: Build
-        run: go build ./...
+      - name: Frontend build and tests
+        working-directory: web
+        run: |
+          npm install
+          npm run build
+          npm test
 
-      - name: Vet
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
         run: go vet ./...
 
-      - name: Test
+      - name: go test
         run: go test ./...
 
-      # The race detector needs cgo, which is available out of the box on the
-      # Linux runner but not on a stock Windows install.
-      - name: Test with race detector
+      - name: go test -race
+        # The race detector needs cgo; the Linux runner has gcc preinstalled.
+        if: runner.os == 'Linux'
         run: go test -race ./...
+
+      - name: Benchmarks (smoke)
+        if: runner.os == 'Linux'
+        run: go test -run=^$ -bench=. -benchtime=1x ./internal/probe
+
+      - name: Build
+        run: go build -trimpath -o bin/ ./...
