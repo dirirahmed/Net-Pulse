@@ -246,6 +246,22 @@ export interface Config {
     gpuTemperature: Threshold;
     sustainedCpu: { averagePercent: number; windowMinutes: number };
   };
+  network: NetworkConfig;
+}
+
+export interface NetTargetConfig {
+  id: string;
+  name: string;
+  target: string;
+}
+
+export interface NetworkConfig {
+  allowPrivateTargets: boolean;
+  checkIntervalSeconds: number;
+  failuresBeforeAlert: number;
+  slowResponseMs: number;
+  certExpiry: { warningDays: number; criticalDays: number };
+  targets: NetTargetConfig[];
 }
 
 export interface SettingsResponse {
@@ -309,3 +325,202 @@ export interface AskResponse {
 
 export const RANGES = ["5m", "15m", "30m", "1h", "6h", "24h", "7d"] as const;
 export type RangeKey = (typeof RANGES)[number];
+
+// ---- Network monitoring (internal/netwatch, internal/api/network.go) ----
+
+export type NetStatus = "pending" | "up" | "degraded" | "down" | "blocked";
+
+/** One scheduled check. Timings are null when that step didn't run. */
+export interface NetCheck {
+  targetId: string;
+  timestamp: string;
+  status: NetStatus;
+  dnsMs: number | null;
+  connectMs: number | null;
+  tlsMs: number | null;
+  ttfbMs: number | null;
+  responseMs: number | null;
+  httpStatus: number | null;
+  certDaysLeft: number | null;
+  problem?: string;
+}
+
+export interface TargetView {
+  id: string;
+  name: string;
+  target: string;
+  status: NetStatus;
+  last: NetCheck | null;
+  since: string | null;
+  consecutiveFailures: number;
+  checking: boolean;
+  nextCheckAt: string;
+  recent: NetCheck[];
+  uptime24h: number | null;
+  checks24h: number;
+}
+
+export interface TargetsResponse {
+  targets: TargetView[];
+  allowPrivateTargets: boolean;
+  checkIntervalSeconds: number;
+  maxTargets: number;
+  historyAvailable: boolean;
+  historyError?: string;
+}
+
+export interface NetCheckPoint {
+  timestamp: string;
+  checks: number;
+  up: number;
+  degraded: number;
+  down: number;
+  avgResponseMs: number | null;
+  maxResponseMs: number | null;
+}
+
+export interface NetUptime {
+  checks: number;
+  up: number;
+  degraded: number;
+  down: number;
+}
+
+export interface TargetHistoryResponse {
+  id: string;
+  range: string;
+  bucketSeconds: number;
+  points: NetCheckPoint[];
+  uptime: NetUptime;
+  uptimePercent: number | null;
+}
+
+export const CHECK_KEYS = ["dns", "ports", "tcp", "tls", "http"] as const;
+export type CheckKey = (typeof CHECK_KEYS)[number];
+
+export interface ScanRequest {
+  target: string;
+  checks: CheckKey[];
+  ports?: string;
+}
+
+// The diagnostics report keeps the engine's snake_case JSON (internal/result),
+// the same document `netpulse scan -json` prints. Durations are milliseconds.
+
+export type ProbeStatus = "ok" | "open" | "closed" | "timeout" | "error" | "skipped";
+
+export interface ProbeError {
+  kind: string;
+  message: string;
+}
+
+export interface ReportTarget {
+  raw: string;
+  host: string;
+  port?: number;
+  scheme?: string;
+  path?: string;
+  is_ip: boolean;
+}
+
+export interface DNSResult {
+  host: string;
+  status: ProbeStatus;
+  addresses?: string[];
+  primary?: string;
+  cname?: string;
+  literal?: boolean;
+  duration_ms: number;
+  error?: ProbeError;
+}
+
+export interface PortResult {
+  port: number;
+  service?: string;
+  status: ProbeStatus;
+  duration_ms: number;
+  error?: ProbeError;
+}
+
+export interface PortScanResult {
+  host: string;
+  address?: string;
+  scanned: number;
+  open: number;
+  duration_ms: number;
+  results?: PortResult[];
+}
+
+export interface TCPResult {
+  address: string;
+  status: ProbeStatus;
+  duration_ms: number;
+  local_addr?: string;
+  remote_addr?: string;
+  error?: ProbeError;
+}
+
+export interface Certificate {
+  subject: string;
+  issuer: string;
+  common_name?: string;
+  dns_names?: string[];
+  not_before: string;
+  not_after: string;
+  days_until_expiry: number;
+  expired: boolean;
+  not_yet_valid?: boolean;
+  self_signed?: boolean;
+  is_ca?: boolean;
+}
+
+export interface TLSResult {
+  address: string;
+  server_name?: string;
+  status: ProbeStatus;
+  handshake_duration_ms: number;
+  version?: string;
+  cipher_suite?: string;
+  alpn?: string;
+  verified: boolean;
+  certificates?: Certificate[];
+  verify_error?: ProbeError;
+  error?: ProbeError;
+}
+
+export interface Redirect {
+  from?: string;
+  to: string;
+  status_code?: number;
+}
+
+export interface HTTPResult {
+  url: string;
+  method: string;
+  status: ProbeStatus;
+  final_url?: string;
+  status_code?: number;
+  status_text?: string;
+  proto?: string;
+  ttfb_ms: number;
+  duration_ms: number;
+  headers?: Record<string, string>;
+  redirects?: Redirect[];
+  error?: ProbeError;
+}
+
+export interface ScanReport {
+  target: ReportTarget;
+  started_at: string;
+  duration_ms: number;
+  dns?: DNSResult;
+  ports?: PortScanResult;
+  tcp?: TCPResult;
+  tls?: TLSResult;
+  http?: HTTPResult;
+  notes?: string[];
+}
+
+export interface ScanResponse {
+  report: ScanReport;
+}

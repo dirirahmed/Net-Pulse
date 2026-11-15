@@ -1447,6 +1447,203 @@ textarea:focus {
 
 /* ---------- responsive ---------- */
 
+/* ---------- network ---------- */
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.target-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.target-form .grow {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.target-form-foot {
+  flex-basis: 100%;
+  min-height: 18px;
+  margin-top: 2px;
+}
+
+.network .panel > .target-form {
+  margin-bottom: 12px;
+}
+
+.table.targets tbody tr {
+  cursor: pointer;
+}
+
+.table.targets tbody tr.selected {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.target-cell {
+  max-width: 320px;
+}
+
+.target-name {
+  font-weight: 550;
+}
+
+.target-addr {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+}
+
+.response-cell .num {
+  min-width: 52px;
+}
+
+/* The tile sparkline bleeds to the tile edges; in a table cell it must not. */
+.response-cell .sparkline {
+  flex: none;
+  width: 90px;
+  height: 22px;
+  margin: 0;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.btn.danger {
+  border-color: var(--critical);
+  color: var(--critical-text);
+}
+
+.network .banner + .target-detail {
+  margin-top: 12px;
+}
+
+.target-detail {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin: 14px 0 6px;
+}
+
+.target-charts .chart-title:first-child {
+  margin-top: 0;
+}
+
+.scan-form {
+  display: grid;
+  gap: 8px;
+}
+
+.scan-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.scan-options .chips {
+  margin-bottom: 0;
+}
+
+.chip.on {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+
+.ports-input {
+  width: 160px;
+}
+
+.scan-result {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.scan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.scan-head .grow {
+  flex: 1;
+}
+
+.scan-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scan-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.scan-step > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scan-step h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.break {
+  overflow-wrap: anywhere;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fields-row {
+  gap: 14px 24px;
+}
+
 @media (max-width: 1280px) {
   .tiles {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1455,6 +1652,10 @@ textarea:focus {
 
 @media (max-width: 1000px) {
   .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .target-detail,
+  .scan-steps {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -236,8 +236,8 @@ function AskPulse({ ai }: { ai: AIStatus }) {
           <div className="chat-foot small">
             {inputError ? <span className="tone-text-critical">{inputError}</span> : <span />}
             <span className="muted">
-              Answers use only Net-Pulse's measurements. Asking sends your question, the findings and usage figures, hardware names and
-              top program names (no file paths or hostname) to Anthropic.
+              Answers use only Net-Pulse's measurements. Asking sends your question, the findings and usage figures, hardware names and top
+              program names (no file paths or hostname) to Anthropic.
             </span>
           </div>
         </>

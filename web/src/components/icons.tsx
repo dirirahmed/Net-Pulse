@@ -36,6 +36,25 @@ export const IconPerformance = (p: IconProps) => (
   </Svg>
 );
 
+/** Three linked nodes: monitored hosts. */
+export const IconNetwork = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="5" r="2.2" />
+    <circle cx="5" cy="18" r="2.2" />
+    <circle cx="19" cy="18" r="2.2" />
+    <path d="M11 7 6 16M13 7l5 9M7.2 18h9.6" />
+  </Svg>
+);
+
+export const IconRefresh = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
+    <path d="M4 4v4h4" />
+    <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
+    <path d="M20 20v-4h-4" />
+  </Svg>
+);
+
 export const IconAnalysis = (p: IconProps) => (
   <Svg {...p}>
     <path d="M9 18h6M10 21h4" />

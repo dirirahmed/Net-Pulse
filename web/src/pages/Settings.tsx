@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Banner, Panel } from "../components/ui";
 import type { ThemePref } from "../hooks/useTheme";
 import { api } from "../services/api";
-import type { Config, Threshold } from "../types/api";
+import type { Config, NetworkConfig, Threshold } from "../types/api";
 
 type ThresholdKey = "cpuUsage" | "memoryUsage" | "cpuTemperature" | "gpuTemperature";
 
@@ -81,6 +81,7 @@ export function Settings({
   const set = (patch: Partial<Config>) => setCfg({ ...cfg, ...patch });
   const setTh = (key: ThresholdKey | "diskFreePercent", patch: Partial<Threshold>) =>
     setCfg({ ...cfg, thresholds: { ...cfg.thresholds, [key]: { ...cfg.thresholds[key], ...patch } } });
+  const setNet = (patch: Partial<NetworkConfig>) => setCfg({ ...cfg, network: { ...cfg.network, ...patch } });
   const dirty = JSON.stringify(cfg) !== JSON.stringify(saved);
   // Empty number inputs become NaN, which JSON encodes as null.
   const incomplete = JSON.stringify(cfg).includes("null");
@@ -89,7 +90,10 @@ export function Settings({
     setSaving(true);
     setStatus(null);
     try {
-      const r = await api.saveSettings(cfg);
+      // Targets are edited on the Network page, possibly after this page
+      // loaded; send the current list so saving here never drops one.
+      const latest = await api.settings();
+      const r = await api.saveSettings({ ...cfg, network: { ...cfg.network, targets: latest.config.network.targets } });
       setCfg(r.config);
       setSaved(r.config);
       onSaved(r.config);
@@ -176,6 +180,79 @@ export function Settings({
           </div>
         </Panel>
       </div>
+
+      <Panel
+        title="Network monitoring"
+        aside={
+          <a className="subtle-link small" href="#/network">
+            Manage targets ({cfg.network.targets.length})
+          </a>
+        }
+      >
+        <div className="fields">
+          <label className="field toggle-field">
+            <span className="toggle-row">
+              <input
+                type="checkbox"
+                checked={cfg.network.allowPrivateTargets}
+                onChange={(e) => setNet({ allowPrivateTargets: e.target.checked })}
+              />
+              <span className="field-label">Allow private targets</span>
+            </span>
+            <span className="field-hint">
+              Lets scans and monitored targets reach loopback (localhost), LAN addresses such as your router or NAS, and other reserved
+              ranges. Off by default so the API can't be used to reach the network around this PC. Leave it off if the agent listens on
+              anything other than 127.0.0.1.
+            </span>
+          </label>
+          <div className="grid-2 fields-row">
+            <NumberField
+              label="Check interval"
+              unit="s"
+              min={15}
+              max={3600}
+              value={cfg.network.checkIntervalSeconds}
+              onChange={(v) => setNet({ checkIntervalSeconds: v })}
+              hint="How often each monitored target is checked."
+            />
+            <NumberField
+              label="Checks before alerting"
+              min={1}
+              max={10}
+              value={cfg.network.failuresBeforeAlert}
+              onChange={(v) => setNet({ failuresBeforeAlert: v })}
+              hint="Consecutive failed (or slow) checks before an alert opens."
+            />
+            <NumberField
+              label="Slow response"
+              unit="ms"
+              min={50}
+              max={60000}
+              value={cfg.network.slowResponseMs}
+              onChange={(v) => setNet({ slowResponseMs: v })}
+              hint="At or above this, a check counts as degraded."
+            />
+            <div className="field">
+              <span className="field-label">Certificate expiry</span>
+              <span className="field-input">
+                <NumInput
+                  value={cfg.network.certExpiry.warningDays}
+                  unit="days warning"
+                  max={365}
+                  onChange={(v) => setNet({ certExpiry: { ...cfg.network.certExpiry, warningDays: v } })}
+                />
+                <NumInput
+                  value={cfg.network.certExpiry.criticalDays}
+                  unit="days critical"
+                  max={365}
+                  onChange={(v) => setNet({ certExpiry: { ...cfg.network.certExpiry, criticalDays: v } })}
+                />
+              </span>
+              <span className="field-hint">Alert when a monitored TLS certificate has this many days or fewer left.</span>
+            </div>
+          </div>
+        </div>
+      </Panel>
 
       <Panel
         title="Alert thresholds"
@@ -306,9 +383,10 @@ export function Settings({
         </Panel>
         <Panel title="Privacy">
           <p className="small">
-            All telemetry is collected and stored on this PC. Net-Pulse makes no network requests of its own, has no cloud component and
-            uses no AI or machine-learning models. It reads interface byte counters only and never inspects network traffic. Process names
-            and paths are shown live but are not written to the history database.
+            All telemetry is collected and stored on this PC, and there is no cloud component. Net-Pulse only connects out to the network
+            targets you add and to scans you start, plus Ask Pulse if you set an API key. Throughput monitoring reads interface byte
+            counters only and never inspects network traffic. Process names and paths are shown live but are not written to the history
+            database.
           </p>
         </Panel>
       </div>

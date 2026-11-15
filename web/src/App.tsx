@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState, type ComponentType } from "react";
-import { IconAlerts, IconAnalysis, IconDashboard, IconPerformance, IconProcesses, IconSettings, Logo } from "./components/icons";
+import {
+  IconAlerts,
+  IconAnalysis,
+  IconDashboard,
+  IconNetwork,
+  IconPerformance,
+  IconProcesses,
+  IconSettings,
+  Logo,
+} from "./components/icons";
 import { Banner } from "./components/ui";
 import { useHashRoute, type Route } from "./hooks/useHashRoute";
 import { usePolling } from "./hooks/usePolling";
@@ -9,6 +18,7 @@ import { gradeLabel, gradeTone } from "./lib/status";
 import { Alerts } from "./pages/Alerts";
 import { Analysis } from "./pages/Analysis";
 import { Dashboard } from "./pages/Dashboard";
+import { Network } from "./pages/Network";
 import { Performance } from "./pages/Performance";
 import { Processes } from "./pages/Processes";
 import { Settings } from "./pages/Settings";
@@ -18,6 +28,7 @@ import type { Config } from "./types/api";
 const NAV: { route: Route; label: string; Icon: ComponentType }[] = [
   { route: "dashboard", label: "Dashboard", Icon: IconDashboard },
   { route: "performance", label: "Performance", Icon: IconPerformance },
+  { route: "network", label: "Network", Icon: IconNetwork },
   { route: "analysis", label: "Analysis", Icon: IconAnalysis },
   { route: "processes", label: "Processes", Icon: IconProcesses },
   { route: "alerts", label: "Alerts", Icon: IconAlerts },
@@ -110,6 +121,7 @@ export function App() {
         {route === "dashboard" &&
           (sys ? <Dashboard system={sys} /> : !system.error && <p className="muted page">Collecting the first sample…</p>)}
         {route === "performance" && <Performance intervalMs={intervalMs} />}
+        {route === "network" && <Network />}
         {route === "analysis" && <Analysis />}
         {route === "processes" && <Processes />}
         {route === "alerts" && <Alerts />}

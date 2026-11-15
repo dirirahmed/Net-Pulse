@@ -81,10 +81,11 @@ go build -o bin\netpulse.exe .\cmd\netpulse
 - **Network throughput.** Download and upload rates, cumulative totals, and history. Only interface byte counters are read; packets are never inspected.
 - **Processes.** Name, PID, CPU %, memory, executable path (when accessible) and status, with sorting and search. Read-only: terminating processes is deliberately **not** supported.
 - **Performance page.** Historical charts for CPU, memory, GPU, temperatures, network, disk I/O and drive fill level over 5m / 15m / 30m / 1h / 6h / 24h / 7d, with average and peak for the selected range and a hover crosshair and tooltip.
+- **Network page.** Add and remove monitored targets, see each one's status, response-time sparkline, 24-hour uptime and certificate expiry at a glance, drill into response-time and availability charts over 5m–7d with the last checks and their errors, and run on-demand diagnostics (DNS, ports, TCP, TLS, HTTP) with the full report shown as cards. A scanned host can be turned into a monitored target with one click.
 - **Network monitoring.** Hosts and URLs you configure are checked on a schedule with the diagnostics engine (DNS, TCP, TLS, HTTP), classified as up / degraded / down, stored with their timings, and alerted on when they go down, get slow, or their TLS certificate nears expiry. See [Network monitoring](#network-monitoring).
 - **Alerts.** Deterministic rules with sustain periods, hysteresis and cooldowns, shown with severity, timestamp, component and reason, plus stored alert history.
 - **Analysis.** Rule-based findings with evidence, explanations and recommendations, plus the optional Ask Pulse assistant. See [Performance analysis](#performance-analysis).
-- **Settings.** Refresh interval, history resolution and retention, alert cooldown, all thresholds, and theme (dark / light / system), editable in the UI and saved to a JSON config file.
+- **Settings.** Refresh interval, history resolution and retention, alert cooldown, all thresholds, network monitoring (private targets, check interval, alerting and certificate thresholds), and theme (dark / light / system), editable in the UI and saved to a JSON config file.
 - **Single binary.** The built frontend is embedded in the Go executable with `go:embed`.
 
 **Network diagnostics (`netpulse scan`)**
@@ -145,7 +146,7 @@ Two checks, because neither is enough alone. `CheckTarget` resolves the name and
 
 ## Network monitoring
 
-`netpulse serve` checks every target in `network.targets` every `checkIntervalSeconds` (default 60 s) using the same engine as `netpulse scan`: DNS, a TCP connection to the target's port, a verifying TLS handshake on TLS ports or `https://` URLs, and an HTTP request on HTTP ports or URLs. Port scans are not part of scheduled checks. Targets are added and removed through the API (`POST /api/targets`, `DELETE /api/targets/{id}`) or in `config.json`:
+`netpulse serve` checks every target in `network.targets` every `checkIntervalSeconds` (default 60 s) using the same engine as `netpulse scan`: DNS, a TCP connection to the target's port, a verifying TLS handshake on TLS ports or `https://` URLs, and an HTTP request on HTTP ports or URLs. Port scans are not part of scheduled checks. Targets are added and removed on the dashboard's **Network** page, through the API (`POST /api/targets`, `DELETE /api/targets/{id}`), or in `config.json`:
 
 ```json
 "network": {
@@ -216,7 +217,7 @@ internal/
   netwatch/            scheduled checks of network targets, their status and alerts
 web/
   src/components/      charts (hand-written SVG), tiles, panels, status pills
-  src/pages/           Dashboard, Performance, Analysis, Processes, Alerts, Settings
+  src/pages/           Dashboard, Performance, Network, Analysis, Processes, Alerts, Settings
   src/hooks/           polling, hash routing, theme
   src/services/        typed API client
   src/types/           API response types
@@ -547,7 +548,7 @@ What the tests cover:
 - **ai** (fake Anthropic server via `httptest`): disabled without a key, environment configuration, request headers and body (system prompt, conversation, findings in the data block), answer parsing, error mapping (401, 429, 529, non-JSON), truncated and empty answers, timeouts, and that the key never appears in errors.
 - **api, network endpoints:** target list with uptime and without history, adding (id derivation and de-duplication, validation, the target limit, guard refusals with `"blocked": true`, content-type enforcement), deleting, history ranges and errors, check-now, scan request parsing and defaults, the 1024-port cap, busy and blocked scans, network alerts merged into `/api/system` and `/api/alerts` most severe first, and settings changes reaching the network monitor.
 - **api, analysis endpoints:** `/api/analysis` built from series data, graceful degradation without history or processes, AI status reporting, `/api/ai/ask` disabled / success / validation / history sanitising / upstream errors, and that the hostname never reaches the model.
-- **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building.
+- **frontend** (Vitest): formatting (including `null` → "Unavailable"), process filtering and sorting (unmeasured CPU always last), chart math (nice axis maxima in decimal and binary units, gaps in lines, nearest-point hover), status-tone mapping and hash routing; analysis status tones, metric rows (unavailable stays "Unavailable"), question validation and chat-history building; network status and uptime tones (uptime never rounds up to 100%), millisecond formatting, certificate thresholds, response sparklines with gaps for failed checks, per-bucket availability, target input validation, open-ports-first sorting and the scan verdict.
 
 ## Performance of the agent itself
 
