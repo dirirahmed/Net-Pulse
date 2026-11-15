@@ -45,6 +45,7 @@ const (
 	maxHistoryPoints = 300
 	uptimeWindow     = 24 * time.Hour
 	privateHint      = "Turn on \"Allow private targets\" in Settings to reach loopback and LAN addresses."
+	demoPrivateHint  = "The live demo never reaches loopback, private or cloud metadata addresses."
 )
 
 func (s *Server) networkRoutes(mux *http.ServeMux) {
@@ -108,7 +109,7 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddTarget(w http.ResponseWriter, r *http.Request) {
-	if !s.requireNetwork(w) || !requireJSON(w, r) {
+	if !s.requireNetwork(w) || s.readOnly(w) || !requireJSON(w, r) {
 		return
 	}
 	var req AddTargetRequest
@@ -126,7 +127,7 @@ func (s *Server) handleAddTarget(w http.ResponseWriter, r *http.Request) {
 	// Refuse a target the guard would block on every check, with the reason,
 	// instead of saving something that can never work.
 	if err := s.net.CheckAllowed(r.Context(), req.Target); err != nil {
-		writeBlocked(w, err)
+		s.writeBlocked(w, err)
 		return
 	}
 
@@ -148,7 +149,7 @@ func (s *Server) handleAddTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
-	if !s.requireNetwork(w) {
+	if !s.requireNetwork(w) || s.readOnly(w) {
 		return
 	}
 	id := r.PathValue("id")
@@ -241,11 +242,20 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if len(ports) > netwatch.MaxScanPorts {
+		limit := netwatch.MaxScanPorts
+		if s.demo {
+			limit = demoMaxScanPorts
+		}
+		if len(ports) > limit {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"%d ports requested; the dashboard scans at most %d (use `netpulse scan` for larger scans)", len(ports), netwatch.MaxScanPorts))
+				"%d ports requested; the dashboard scans at most %d (use `netpulse scan` for larger scans)", len(ports), limit))
 			return
 		}
+	}
+	if s.scanLimit != nil && !s.scanLimit.allow() {
+		writeError(w, http.StatusTooManyRequests, fmt.Sprintf(
+			"The live demo allows %d scans a minute across all visitors. Try again shortly.", demoScansPerMinute))
+		return
 	}
 
 	rep, err := s.net.Scan(r.Context(), netwatch.ScanRequest{Target: target, Checks: checks, Ports: ports})
@@ -254,7 +264,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, err.Error())
 		return
 	case err != nil:
-		writeBlocked(w, err)
+		s.writeBlocked(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ScanResponse{Report: rep})
@@ -262,10 +272,14 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 
 // writeBlocked reports a guard refusal as 422 with a hint, and anything else
 // as a bad request.
-func writeBlocked(w http.ResponseWriter, err error) {
+func (s *Server) writeBlocked(w http.ResponseWriter, err error) {
 	var blocked *safety.BlockedError
 	if errors.As(err, &blocked) {
-		writeJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: blocked.Error() + ". " + privateHint, Blocked: true})
+		hint := privateHint
+		if s.demo {
+			hint = demoPrivateHint
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: blocked.Error() + ". " + hint, Blocked: true, Demo: s.demo})
 		return
 	}
 	writeError(w, http.StatusBadRequest, err.Error())

@@ -36,16 +36,21 @@ const NAV: { route: Route; label: string; Icon: ComponentType }[] = [
 ];
 
 const DEFAULT_INTERVAL_MS = 2000;
+const RELEASES_URL = "https://github.com/dirirahmed/Net-Pulse/releases/latest";
 
 export function App() {
   const route = useHashRoute();
   const [theme, setTheme] = useTheme();
   const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS);
+  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     api
       .settings()
-      .then((r) => setIntervalMs(r.config.sampleIntervalSeconds * 1000))
+      .then((r) => {
+        setIntervalMs(r.config.sampleIntervalSeconds * 1000);
+        setDemo(r.demo === true);
+      })
       .catch(() => {
         /* keep the default; the connection banner reports failures */
       });
@@ -112,6 +117,17 @@ export function App() {
           </div>
         </header>
 
+        {demo && (
+          <Banner tone="info">
+            <strong>Live demo.</strong> This dashboard is monitoring the small cloud server it runs on, not your computer. Settings and
+            monitored targets are read-only; on-demand scans of public hosts work.{" "}
+            <a href={RELEASES_URL} target="_blank" rel="noreferrer">
+              Download Net-Pulse
+            </a>{" "}
+            to monitor your own PC.
+          </Banner>
+        )}
+
         {system.error && (
           <Banner tone="critical">
             {system.error}. {sys ? "Showing the last values received; retrying automatically." : "Make sure `netpulse serve` is running."}
@@ -121,11 +137,11 @@ export function App() {
         {route === "dashboard" &&
           (sys ? <Dashboard system={sys} /> : !system.error && <p className="muted page">Collecting the first sample…</p>)}
         {route === "performance" && <Performance intervalMs={intervalMs} />}
-        {route === "network" && <Network />}
+        {route === "network" && <Network readOnly={demo} />}
         {route === "analysis" && <Analysis />}
         {route === "processes" && <Processes />}
         {route === "alerts" && <Alerts />}
-        {route === "settings" && <Settings theme={theme} setTheme={setTheme} onSaved={onSaved} />}
+        {route === "settings" && <Settings theme={theme} setTheme={setTheme} onSaved={onSaved} readOnly={demo} />}
       </main>
     </div>
   );

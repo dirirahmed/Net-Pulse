@@ -267,6 +267,8 @@ export interface NetworkConfig {
 export interface SettingsResponse {
   config: Config;
   restartRequired?: string[];
+  /** The public read-only demo: hide editing. */
+  demo?: boolean;
 }
 
 // ---- Performance analysis and Ask Pulse ----

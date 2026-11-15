@@ -1,0 +1,20 @@
+{
+  "sampleIntervalSeconds": 5,
+  "historyIntervalSeconds": 30,
+  "retentionDays": 1,
+  "network": {
+    "allowPrivateTargets": false,
+    "checkIntervalSeconds": 60,
+    "failuresBeforeAlert": 3,
+    "slowResponseMs": 1500,
+    "certExpiry": { "warningDays": 21, "criticalDays": 7 },
+    "targets": [
+      { "id": "google", "name": "Google", "target": "https://www.google.com" },
+      { "id": "github", "name": "GitHub", "target": "https://github.com" },
+      { "id": "cloudflare-dns", "name": "Cloudflare DNS", "target": "1.1.1.1:53" },
+      { "id": "wikipedia", "name": "Wikipedia", "target": "https://www.wikipedia.org" },
+      { "id": "expired-cert", "name": "Expired certificate (badssl.com)", "target": "https://expired.badssl.com" },
+      { "id": "closed-port", "name": "Closed port (simulated outage)", "target": "1.1.1.1:81" }
+    ]
+  }
+}

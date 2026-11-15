@@ -78,6 +78,8 @@ type AlertsResponse struct {
 type SettingsResponse struct {
 	Config          config.Config `json:"config"`
 	RestartRequired []string      `json:"restartRequired,omitempty"`
+	// Demo is true on the public read-only demo; the UI hides editing.
+	Demo bool `json:"demo,omitempty"`
 }
 
 // AnalysisResponse is GET /api/analysis (V2).
@@ -161,4 +163,6 @@ type errorResponse struct {
 	// Blocked marks a target refused by the private-address guard, so the
 	// UI can point at the setting.
 	Blocked bool `json:"blocked,omitempty"`
+	// Demo marks a request refused because this is the read-only demo.
+	Demo bool `json:"demo,omitempty"`
 }

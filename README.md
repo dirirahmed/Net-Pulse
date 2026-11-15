@@ -33,6 +33,7 @@ _The screenshots were captured before PC Sentinel merged into Net-Pulse, so they
 ## Contents
 
 - [Install](#install)
+- [Live demo and deploying](#live-demo-and-deploying)
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Network diagnostics: `netpulse scan`](#network-diagnostics-netpulse-scan)
@@ -73,6 +74,34 @@ Download the archive for your system from the [latest release](https://github.co
 ```
 
 `SHA256SUMS.txt` in each release lists the archive checksums (`Get-FileHash .\netpulse_*.zip` on Windows, `sha256sum -c SHA256SUMS.txt` on Linux). The Windows binary isn't code-signed, so SmartScreen may warn on first run: choose **More info → Run anyway**. macOS isn't packaged yet; build it from source as below.
+
+## Live demo and deploying
+
+`netpulse serve -demo` runs Net-Pulse as a public, read-only showcase. It is what the hosted demo runs, from the repository's [`Dockerfile`](Dockerfile) and [`render.yaml`](render.yaml).
+
+| In demo mode | Why |
+| --- | --- |
+| Listens on all interfaces, on `$PORT` when the platform sets one | Hosting platforms route traffic to that port |
+| Any `Host` name is accepted | The demo is public; the DNS-rebinding check protects a *local* agent's data, and the demo serves none |
+| Settings and monitored targets are read-only (`403`), and the config file is never written | Visitors can look, not reconfigure |
+| `allowPrivateTargets` is forced off, whatever the config file says | A public page must never reach the host's private network or cloud metadata endpoints |
+| On-demand scans: at most 10 a minute across all visitors, 64 ports each, one at a time | Keeps the demo from being used as a scanning service |
+| Ask Pulse is off and the API key is never read | Nobody's API credit is spent by visitors |
+| Fixed targets from [`deploy/demo-config.json`](deploy/demo-config.json), including a closed port and an expired certificate ([badssl.com](https://badssl.com)) | Shows outages, certificate findings and alerts without setup |
+| A banner explains that the dashboard shows the server, not the visitor's PC | It is the server's CPU, memory and disks |
+
+`GET /healthz` always answers `200` (unlike `/api/health`, which waits for the first sample), for platform health checks. In any mode the server now has read, write and idle timeouts.
+
+**Deploy to Render (free).** In the Render dashboard choose **New → Blueprint**, pick this repository, and apply. Render builds the [`Dockerfile`](Dockerfile) and deploys it as the free web service in [`render.yaml`](render.yaml), redeploying on every push to `main`. On the free plan the service sleeps after 15 minutes without traffic and takes about a minute to wake on the next visit; its disk is temporary, so the demo's history starts over after each sleep or deploy. Render may ask for a card when creating the service.
+
+**Run the image yourself:**
+
+```bash
+docker build -t netpulse .
+docker run --rm -p 8080:8080 netpulse          # demo mode on http://localhost:8080
+```
+
+The image is multi-stage (Node builds the dashboard, Go builds a static binary with it embedded) and runs on `distroless/static` as a non-root user. Inside a container Net-Pulse monitors that container's host, so for your own PC use a [release binary](#install) instead.
 
 ## Quick start
 
@@ -233,6 +262,9 @@ internal/
   result/              structured diagnostic result types (pure data, JSON ready)
   safety/              target checks for callers that don't own the target
   netwatch/            scheduled checks of network targets, their status and alerts
+deploy/
+  demo-config.json     the public demo's settings and targets
+Dockerfile, render.yaml  container image and Render blueprint for the demo
 web/
   src/components/      charts (hand-written SVG), tiles, panels, status pills
   src/pages/           Dashboard, Performance, Network, Analysis, Processes, Alerts, Settings
@@ -567,7 +599,8 @@ cd web && npm test
 What the tests cover:
 
 - **probe / engine / safety / cli:** DNS with a fake resolver, port parsing and the worker-pool scanner (loopback listeners), TCP error classification, verifying TLS against `httptest` certificates (expired, wrong host, self-signed), HTTP redirects and timings, target parsing, that `Options.Dialer` is used by every probe, the reserved-address and hostname blocklists including IPv4-mapped IPv6, and CLI flag handling. These need no internet access.
-- **cmd/netpulse and agent:** subcommand dispatch, help, `version`, unknown commands, and the legacy data-directory fallback.
+- **cmd/netpulse and agent:** subcommand dispatch, help, `version`, unknown commands, the legacy data-directory fallback, `$PORT` handling, and that the shipped demo config loads, validates and gets the demo overrides.
+- **api, demo mode:** settings and targets read-only with `403`, check-now still allowed, Ask Pulse off even with a key, any host name accepted (and still rejected outside demo mode), the 64-port cap, the shared scan rate limit and its refill, a demo-specific blocked-target message, and `/healthz` answering before the first sample.
 - **netwatch:** check classification for every outcome (DNS, TCP, TLS handshake and certificate failures, 5xx vs 4xx, slow responses, IP literals), scheduling on the interval and "check now", the unreachable alert opening only after N consecutive failures and resolving on recovery, the slow alert, certificate expiry escalating warning → critical under the same ID and surviving an outage, removed and re-pointed targets, and, with real sockets, a loopback HTTP server checked as up and the guard blocking it by default.
 - **network storage:** check bucketing and uptime counts with blocked checks excluded, pruning, and upgrading a version 1 database in place.
 - **analyzer:** scoring-rule boundaries, the worst-category cap, exclusion of unavailable categories, grade cut-offs, the alert sustain timer (including reset on a dip), escalation keeping the same ID, the hysteresis band, cooldown, resolution of vanished targets, rules skipped when sensors are missing, disk-space classification, and series summaries using peak columns.

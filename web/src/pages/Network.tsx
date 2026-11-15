@@ -39,7 +39,7 @@ const POLL_MS = 5000;
 const HISTORY_POLL_MS = 30_000;
 const RECENT_ROWS = 10;
 
-export function Network() {
+export function Network({ readOnly = false }: { readOnly?: boolean }) {
   const fetcher = useCallback(() => api.targets(), []);
   const { data, error, refresh } = usePolling(fetcher, POLL_MS);
   const [selected, setSelected] = useState<string | null>(null);
@@ -77,14 +77,20 @@ export function Network() {
           )
         }
       >
-        <AddTarget
-          disabled={full}
-          allowPrivate={data?.allowPrivateTargets ?? false}
-          onAdded={(t) => {
-            setSelected(t.id);
-            refresh();
-          }}
-        />
+        {readOnly ? (
+          <p className="muted small">
+            The demo's targets are fixed. They include a closed port and an expired certificate on purpose, to show outages and alerts.
+          </p>
+        ) : (
+          <AddTarget
+            disabled={full}
+            allowPrivate={data?.allowPrivateTargets ?? false}
+            onAdded={(t) => {
+              setSelected(t.id);
+              refresh();
+            }}
+          />
+        )}
         {!data ? (
           !error && <p className="muted">Loading targets…</p>
         ) : targets.length === 0 ? (
@@ -100,19 +106,21 @@ export function Network() {
             onChanged={refresh}
             warnDays={warnDays}
             critDays={critDays}
+            readOnly={readOnly}
           />
         )}
       </Panel>
 
       {current && <TargetDetail key={current.id} target={current} warnDays={warnDays} critDays={critDays} />}
 
-      <ScanPanel allowPrivate={data?.allowPrivateTargets ?? false} onMonitored={refresh} />
+      <ScanPanel allowPrivate={data?.allowPrivateTargets ?? false} onMonitored={refresh} readOnly={readOnly} />
     </div>
   );
 }
 
-function PrivateHint({ allowPrivate }: { allowPrivate: boolean }) {
+function PrivateHint({ allowPrivate, demo = false }: { allowPrivate: boolean; demo?: boolean }) {
   if (allowPrivate) return null;
+  if (demo) return <span className="muted small">Loopback and private network addresses are blocked in the live demo.</span>;
   return (
     <span className="muted small">
       Loopback and LAN addresses are blocked. <a href="#/settings">Allow private targets</a> to check your router or a local service.
@@ -194,6 +202,7 @@ function TargetTable({
   onChanged,
   warnDays,
   critDays,
+  readOnly,
 }: {
   targets: TargetView[];
   selected?: string;
@@ -201,6 +210,7 @@ function TargetTable({
   onChanged: () => void;
   warnDays: number;
   critDays: number;
+  readOnly: boolean;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -276,7 +286,7 @@ function TargetTable({
                         <IconRefresh />
                         Check
                       </button>
-                      {confirming === t.id ? (
+                      {readOnly ? null : confirming === t.id ? (
                         <button
                           type="button"
                           className="btn small-btn danger"
@@ -421,7 +431,7 @@ function TargetDetail({ target: t, warnDays, critDays }: { target: TargetView; w
 
 const DEFAULT_CHECKS: Record<CheckKey, boolean> = { dns: true, ports: false, tcp: true, tls: true, http: true };
 
-function ScanPanel({ allowPrivate, onMonitored }: { allowPrivate: boolean; onMonitored: () => void }) {
+function ScanPanel({ allowPrivate, onMonitored, readOnly }: { allowPrivate: boolean; onMonitored: () => void; readOnly: boolean }) {
   const [target, setTarget] = useState("");
   const [checks, setChecks] = useState(DEFAULT_CHECKS);
   const [ports, setPorts] = useState("default");
@@ -521,10 +531,10 @@ function ScanPanel({ allowPrivate, onMonitored }: { allowPrivate: boolean; onMon
         <div className="target-form-foot">
           {err ? (
             <span className="tone-text-critical small">
-              {err.msg} {err.blocked && <a href="#/settings">Open Settings</a>}
+              {err.msg} {err.blocked && !readOnly && <a href="#/settings">Open Settings</a>}
             </span>
           ) : (
-            <PrivateHint allowPrivate={allowPrivate} />
+            <PrivateHint allowPrivate={allowPrivate} demo={readOnly} />
           )}
         </div>
       </form>
@@ -534,12 +544,14 @@ function ScanPanel({ allowPrivate, onMonitored }: { allowPrivate: boolean; onMon
         <ScanResult
           report={report}
           action={
-            <span className="panel-aside-row">
-              {monitorMsg && <span className="small muted">{monitorMsg}</span>}
-              <button type="button" className="btn small-btn" onClick={monitor} disabled={monitorMsg?.startsWith("Now monitoring")}>
-                Monitor this target
-              </button>
-            </span>
+            !readOnly && (
+              <span className="panel-aside-row">
+                {monitorMsg && <span className="small muted">{monitorMsg}</span>}
+                <button type="button" className="btn small-btn" onClick={monitor} disabled={monitorMsg?.startsWith("Now monitoring")}>
+                  Monitor this target
+                </button>
+              </span>
+            )
           }
         />
       )}

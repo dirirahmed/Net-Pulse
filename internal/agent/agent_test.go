@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dirirahmed/Net-Pulse/internal/config"
 )
 
 func TestPickDataDirPrefersNewName(t *testing.T) {
@@ -50,5 +52,37 @@ func TestRunHelp(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "netpulse serve") {
 		t.Fatalf("usage missing command name:\n%s", stderr.String())
+	}
+}
+
+func TestDemoConfigIsValidAndSafe(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "..", "deploy", "demo-config.json"))
+	if err != nil {
+		t.Fatalf("deploy/demo-config.json: %v", err)
+	}
+	if len(cfg.Network.Targets) == 0 {
+		t.Fatal("the demo should come with targets to show")
+	}
+	cfg.Network.AllowPrivateTargets = true // as if someone edited the file
+	applyDemo(&cfg)
+	if cfg.Network.AllowPrivateTargets || cfg.ListenAddress != "0.0.0.0" {
+		t.Errorf("applyDemo left %+v / %q", cfg.Network.AllowPrivateTargets, cfg.ListenAddress)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("demo config invalid after applyDemo: %v", err)
+	}
+}
+
+func TestDemoPort(t *testing.T) {
+	t.Setenv("PORT", "10000")
+	if got := demoPort(0); got != 10000 {
+		t.Errorf("from $PORT: %d", got)
+	}
+	if got := demoPort(8080); got != 8080 {
+		t.Errorf("an explicit -port must win: %d", got)
+	}
+	t.Setenv("PORT", "not-a-port")
+	if got := demoPort(0); got != 0 {
+		t.Errorf("invalid $PORT: %d", got)
 	}
 }

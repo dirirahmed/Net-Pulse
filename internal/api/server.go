@@ -45,6 +45,9 @@ type Server struct {
 	log    *slog.Logger
 	ai     Assistant // optional; nil or disabled when no API key is set
 	net    Network   // optional; nil disables the network endpoints
+
+	demo      bool         // public read-only showcase (demo.go)
+	scanLimit *rateLimiter // demo only
 }
 
 // New creates the API server. static may be nil (API-only mode).
@@ -79,6 +82,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/analysis", s.handleAnalysis)
 	mux.HandleFunc("POST /api/ai/ask", s.handleAsk)
 	s.networkRoutes(mux)
+	// Liveness for hosting platforms: answers before the first sample, unlike
+	// /api/health.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")
 	})
@@ -243,6 +251,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	if s.readOnly(w) {
+		return
+	}
 	// Requiring JSON blocks cross-site form posts, which can't set this type.
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
@@ -272,7 +283,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsResponse(c config.Config) SettingsResponse {
-	resp := SettingsResponse{Config: c}
+	resp := SettingsResponse{Config: c, Demo: s.demo}
 	if c.Port != s.boot.Port {
 		resp.RestartRequired = append(resp.RestartRequired, "port")
 	}
@@ -337,7 +348,9 @@ func (s *Server) localOnly(next http.Handler) http.Handler {
 			host = h
 		}
 		host = strings.Trim(host, "[]")
-		allowed := host == "localhost" || host == s.boot.ListenAddress
+		// The demo is public by design and serves no private data, so any
+		// host name it is reached under is fine.
+		allowed := s.demo || host == "localhost" || host == s.boot.ListenAddress
 		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 			allowed = true
 		}

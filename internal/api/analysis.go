@@ -111,6 +111,9 @@ func (s *Server) networkInput(ctx context.Context) ([]netwatch.TargetStatus, []a
 }
 
 func (s *Server) aiStatus() AIStatus {
+	if s.demo {
+		return AIStatus{Enabled: false, Reason: demoAIMsg}
+	}
 	if s.ai == nil || !s.ai.Enabled() {
 		return AIStatus{Enabled: false, Reason: "Set the " + ai.EnvAPIKey + " environment variable and restart Net-Pulse to enable Ask Pulse."}
 	}
@@ -127,6 +130,10 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	if s.demo {
+		writeError(w, http.StatusServiceUnavailable, demoAIMsg)
+		return
+	}
 	if s.ai == nil || !s.ai.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, ai.ErrDisabled.Error())
 		return

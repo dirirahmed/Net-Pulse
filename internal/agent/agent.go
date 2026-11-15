@@ -40,6 +40,8 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	configPath := fs.String("config", "", "config file path (default <data-dir>/config.json)")
 	port := fs.Int("port", 0, "override the configured API port")
 	openBrowser := fs.Bool("open", runtime.GOOS == "windows", "open the dashboard in the default browser on start")
+	demo := fs.Bool("demo", os.Getenv(EnvDemo) == "1",
+		"run as a public read-only demo: listen on all interfaces (port from $PORT), never save settings, force the private-address guard on, disable Ask Pulse")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage:\n  netpulse serve [flags]\n\nRuns the monitoring agent and serves the dashboard.\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -63,13 +65,20 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 		// A broken config file shouldn't stop monitoring; defaults are safe.
 		log.Error("using default settings", "err", err)
 	}
+	storePath := *configPath
+	if *demo {
+		*port = demoPort(*port)
+		applyDemo(&cfg)
+		*openBrowser = false
+		storePath = "" // the demo never writes its config back
+	}
 	if *port != 0 {
 		cfg.Port = *port
 		if err := cfg.Validate(); err != nil {
 			return err
 		}
 	}
-	cfgStore := config.NewStore(*configPath, cfg)
+	cfgStore := config.NewStore(storePath, cfg)
 
 	// Bind before touching the database so a second instance fails fast
 	// instead of sharing (and closing alerts in) the first one's history.
@@ -112,17 +121,30 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	if !bundled {
 		log.Warn("frontend not bundled; API only (run `npm run build` in web/ before `go build` to embed it)")
 	}
-	// Ask Pulse is optional: without an API key it stays off and
-	// monitoring is unaffected. The key is only read here, never logged.
-	assistant := ai.New(ai.ConfigFromEnv())
-	if assistant.Enabled() {
-		log.Info("Ask Pulse enabled", "model", assistant.Model())
+	handler := api.New(mon, cfgStore, static, log).WithNetwork(nw).WithDemo(*demo)
+	if *demo {
+		// A public demo must not spend anyone's API credit, so the key is
+		// not even read.
+		log.Info("demo mode: read-only settings and targets, private targets blocked, Ask Pulse off")
 	} else {
-		log.Info("Ask Pulse disabled; set " + ai.EnvAPIKey + " to enable it")
+		// Ask Pulse is optional: without an API key it stays off and
+		// monitoring is unaffected. The key is only read here, never logged.
+		assistant := ai.New(ai.ConfigFromEnv())
+		if assistant.Enabled() {
+			log.Info("Ask Pulse enabled", "model", assistant.Model())
+		} else {
+			log.Info("Ask Pulse disabled; set " + ai.EnvAPIKey + " to enable it")
+		}
+		handler.WithAssistant(assistant)
 	}
 	srv := &http.Server{
-		Handler:           api.New(mon, cfgStore, static, log).WithAssistant(assistant).WithNetwork(nw).Handler(),
+		Handler:           handler.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// A scan may run for up to 60 s before its response is written.
+		WriteTimeout:   90 * time.Second,
+		IdleTimeout:    2 * time.Minute,
+		MaxHeaderBytes: 64 << 10,
 	}
 
 	done := make(chan struct{})
@@ -156,6 +178,30 @@ func Run(ctx context.Context, args []string, stderr io.Writer) error {
 	<-done
 	<-netDone
 	return nil
+}
+
+// EnvDemo set to "1" turns on -demo, for container platforms where flags are
+// awkward to change.
+const EnvDemo = "NETPULSE_DEMO"
+
+// demoPort picks the port for demo mode: an explicit -port wins, then the
+// $PORT that hosting platforms (Render, Cloud Run, Koyeb, ...) assign.
+func demoPort(flagPort int) int {
+	if flagPort != 0 {
+		return flagPort
+	}
+	if p, err := strconv.Atoi(os.Getenv("PORT")); err == nil && p > 0 && p <= 65535 {
+		return p
+	}
+	return 0
+}
+
+// applyDemo makes a loaded config safe to serve publicly.
+func applyDemo(cfg *config.Config) {
+	cfg.ListenAddress = "0.0.0.0"
+	// Whatever the file says, a public page must not reach the host's
+	// private network or cloud metadata endpoints.
+	cfg.Network.AllowPrivateTargets = false
 }
 
 // Data directory names under the user config dir (%APPDATA% on Windows).

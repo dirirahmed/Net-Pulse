@@ -53,10 +53,12 @@ export function Settings({
   theme,
   setTheme,
   onSaved,
+  readOnly = false,
 }: {
   theme: ThemePref;
   setTheme: (t: ThemePref) => void;
   onSaved: (c: Config) => void;
+  readOnly?: boolean;
 }) {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [saved, setSaved] = useState<Config | null>(null);
@@ -112,6 +114,11 @@ export function Settings({
   const t = cfg.thresholds;
   return (
     <div className="page settings">
+      {readOnly && (
+        <Banner tone="info">
+          These are the live demo's settings. They are shown for reference and can't be saved; the theme still applies.
+        </Banner>
+      )}
       <div className="grid-2">
         <Panel title="Monitoring">
           <div className="fields">
@@ -328,29 +335,31 @@ export function Settings({
         </div>
       </Panel>
 
-      <div className="save-bar">
-        {status && <Banner tone={status.tone}>{status.msg}</Banner>}
-        <div className="save-actions">
-          <button
-            className="btn"
-            disabled={!dirty || saving}
-            onClick={() => {
-              setCfg(saved);
-              setStatus(null);
-            }}
-          >
-            Discard
-          </button>
-          <button
-            className="btn primary"
-            disabled={!dirty || saving || incomplete}
-            onClick={save}
-            title={incomplete ? "Fill in every field" : undefined}
-          >
-            {saving ? "Saving…" : "Save settings"}
-          </button>
+      {!readOnly && (
+        <div className="save-bar">
+          {status && <Banner tone={status.tone}>{status.msg}</Banner>}
+          <div className="save-actions">
+            <button
+              className="btn"
+              disabled={!dirty || saving}
+              onClick={() => {
+                setCfg(saved);
+                setStatus(null);
+              }}
+            >
+              Discard
+            </button>
+            <button
+              className="btn primary"
+              disabled={!dirty || saving || incomplete}
+              onClick={save}
+              title={incomplete ? "Fill in every field" : undefined}
+            >
+              {saving ? "Saving…" : "Save settings"}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid-2">
         <Panel title="How the health score works">

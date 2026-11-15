@@ -1,0 +1,13 @@
+.git
+.github
+bin
+docs
+web/node_modules
+web/dist/*
+!web/dist/.gitkeep
+**/*.db
+**/*.db-*
+*.exe
+config.json
+.env
+.env.*

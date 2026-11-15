@@ -1,0 +1,12 @@
+# Render Blueprint for the public Net-Pulse demo.
+# Render dashboard -> New -> Blueprint -> pick this repository.
+# The free plan sleeps after 15 minutes without traffic and wakes on the
+# next request (about a minute); demo history starts over after each sleep.
+services:
+  - type: web
+    name: netpulse-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
